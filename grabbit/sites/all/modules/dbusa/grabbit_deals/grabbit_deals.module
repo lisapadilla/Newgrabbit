@@ -1,0 +1,395 @@
+<?
+
+/**
+ * Implementation of hook_menu()
+ */
+function grabbit_deals_menu() {
+
+  $items['deals/display'] = array( 
+    'page callback' => 'grabbit_deals_display', 
+    'access arguments' => array('access content')
+  );
+  
+  $items['deals/calculate'] = array( 
+    'page callback' => 'grabbit_deals_calculate', 
+    'access arguments' => array('access content')
+  );
+  
+  $items['deals/detail'] = array( 
+    'page callback' => 'grabbit_deals_detail', 
+    'access arguments' => array('access content')
+  );
+
+  $items['deals/open'] = array( 
+    'page callback' => 'grabbit_deals_open_and_track', 
+    'access arguments' => array('access content')
+  );
+
+  return $items;
+}
+
+// renders the page view of a specific deal
+function grabbit_deals_detail()
+{
+  $asin = arg(2);
+  
+  require_once 'amazon/amazon_api_class.php';
+  $api = new AmazonProductAPI();
+  
+  try
+  {
+    $result = $api->getItemByAsin($asin);
+    $deal = $result->Items->Item;
+  }
+  catch (Exception $e)
+  {
+    drupal_goto('deals/invalid');
+  }
+  
+  $listprice = (int)$deal->ItemAttributes->ListPrice->Amount;
+  $offer = (int)$deal->OfferSummary->LowestNewPrice->Amount;
+  
+  $out = '
+  <div class="deal-detail">
+    <h1>Amazon Deal</h1>
+    <div class="back">'.l('&laquo; <span>Back to stream</span>', '<front>', array('html' => true)).'</div>
+    <div class="deal-container">
+      <div class="group">'.$deal->ItemAttributes->ProductGroup.'</div>
+      
+      <div class="clearfix">
+          
+        <div class="image">
+            <img src="'.$deal->LargeImage->URL.'" width="250"/>
+            '.l('buy', $deal->DetailPageURL, array( 'attributes' => array('class' => 'buy', 'target' => '_blank'), 'absolute' => true )).'
+            <div class="product-link">
+              <strong>Or go to product page:</strong>'.l(substr($deal->DetailPageURL, 0, 60).'...', $deal->DetailPageURL, array( 'attributes' => array('target' => '_blank'), 'absolute' => true )).'
+            </div>
+        </div>
+        <div class="info">
+          <h2>'.$deal->ItemAttributes->Title.'</h2>
+          <div class="asin">Product #: '.$asin.'</div>
+          <div class="prices">
+            <div class="list">List Price: '.$deal->ItemAttributes->ListPrice->CurrencyCode.' '.$deal->ItemAttributes->ListPrice->FormattedPrice.'</div>';
+    if ( $listprice != $offer )
+    {
+      $out .= '<div class="lowest">Lowest New Price: <span>'.$deal->OfferSummary->LowestNewPrice->CurrencyCode.' '.$deal->OfferSummary->LowestNewPrice->FormattedPrice.'</span></div>'; 
+    }
+    $out .= '
+            </div>
+            <div class="description">'.$deal->EditorialReviews->EditorialReview->Content.'</div>
+          </div>
+        
+      </div>
+      <div class="from">From <span>Amazon.com</span></div>
+    </div>
+  </div>
+    ';
+    grabbit_statistics_save_deal_prog(base_path().'deals/open/'.$asin,$deal->ItemAttributes->ListPrice->FormattedPrice); // tracking statistics
+  return $out;
+}
+
+//implementation of hook grabbit_status_form
+function grabbit_deals_grabbit_status_form(){
+	global $user;
+	
+	if($user->uid>0)
+	{
+	  drupal_add_js(drupal_get_path('module', 'grabbit_deals').'/deals_engine.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'grabbit_deals').'/stream_visibles.js', $type = 'module');
+	}
+	
+}
+
+function grabbit_deals_display()
+{
+  require_once 'amazon/amazon_api_class.php';
+  
+  $obj = new AmazonProductAPI();
+  $nid = $_GET['nid'];
+  global $user;
+  $uid = $user->uid;
+  $keys=grabbit_deals_extract_keywords($nid);
+  $keywords = implode(', ',array_keys($keys));
+  try
+  {
+    $result = $obj->getItemByKeyword($keywords, AmazonProductAPI::ALL);
+  }
+  catch(Exception $e)
+  {
+    $error = $e->getMessage();
+  }
+  
+  if ( $result )
+  {
+    $out = 
+    '<div class="deals-display clearfix">
+      <a class="close" href="#">close</a>
+      <h4>Deals that match your tags:</h4>';
+      
+    $i = 0;
+    foreach ( $result->Items->Item as $deal )
+    {
+      if ( $deal->ItemAttributes->ListPrice->FormattedPrice )
+      {
+        $i++;
+        if ( $i == 6 ) break;
+      
+        $out .= 
+        '<div class="deal-item clearfix">'.
+          l( 'buy', 'deals/open/'.$deal->ASIN, 
+            array( 'attributes' => array('class' => 'buy', 'target' => '_blank'), 'absolute' => true ) ).'
+          <div class="provider">Amazon.com</div>
+          <div class="info">
+            '.l( '&raquo; <span>more...</span>', 'deals/detail/'.$deal->ASIN , 
+              array( 'attributes' => array('class' => 'more'), 'html' => true ) ).'
+            <span class="name">'. $deal->ItemAttributes->Title .'</span>
+            <span class="price">'. $deal->ItemAttributes->ListPrice->FormattedPrice .'</span>
+          </div>
+        </div>';
+      }
+    }
+    $out .= '</div>';
+  
+    print $out;  
+  }else{
+    $keywords = grabbit_deals_extract_tags( $nid, $uid );	
+	try
+	  {
+	    $result = $obj->getItemByKeyword($keywords, AmazonProductAPI::ALL);
+	  }
+	  catch(Exception $e)
+	  {
+	    $error = $e->getMessage();
+	  }
+
+	  if ( $result )
+	  {
+	    $out = 
+	    '<div class="deals-display clearfix">
+	      <a class="close" href="#">close</a>
+	      <h4>Deals that match your tags:</h4>';
+
+	    $i = 0;
+	    foreach ( $result->Items->Item as $deal )
+	    {
+	      if ( $deal->ItemAttributes->ListPrice->FormattedPrice )
+	      {
+	        $i++;
+	        if ( $i == 6 ) break;
+
+	        $out .= 
+	        '<div class="deal-item clearfix">'.
+	          l( 'buy', 'deals/open/'.$deal->ASIN, 
+	            array( 'attributes' => array('class' => 'buy', 'target' => '_blank'), 'absolute' => true ) ).'
+	          <div class="provider">Amazon.com</div>
+	          <div class="info">
+	            '.l( '&raquo; <span>more...</span>', 'deals/detail/'.$deal->ASIN , 
+	              array( 'attributes' => array('class' => 'more'), 'html' => true ) ).'
+	            <span class="name">'. $deal->ItemAttributes->Title .'</span>
+	            <span class="price">'. $deal->ItemAttributes->ListPrice->FormattedPrice .'</span>
+	          </div>
+	        </div>';
+	      }
+	    }
+	    $out .= '</div>';
+
+	    print $out;  
+        }	
+   }
+  
+}
+
+function grabbit_deals_check_available($keywords=NULL)
+{
+  require_once 'amazon/amazon_api_class.php';
+  
+  $obj = new AmazonProductAPI();
+
+  try
+  {
+    $result = $obj->getItemFast($keywords, AmazonProductAPI::ALL);
+  }
+  catch(Exception $e)
+  {
+    $error = $e->getMessage();
+  }
+  
+  if ( $result )
+  {
+	return $result;
+  }else{
+    return NULL;	
+  }
+}
+
+function grabbit_deals_calculate()
+{
+  $nid = $_GET['nid'];
+  global $user;
+
+  if($keywords = grabbit_deals_extract_keywords($nid) ){
+	$keys= array_keys($keywords);
+	$keys = implode(', ',$keys);
+
+	if($available = grabbit_deals_check_available($keys)){
+	  print $available;	
+	  return;
+	}elseif ( $tags = grabbit_deals_extract_tags($nid, $user->uid) )
+	  {
+		if($user->uid==1){
+		//	print_r($nid);
+		 // print_r($tags);	
+		}
+		if($available = grabbit_deals_check_available($tags)){
+		  print $available;
+		  return;	
+		}
+	  }
+  }else{
+    if ( $tags = grabbit_deals_extract_tags($nid, $user->uid) )
+	  {
+		if($user->uid==1){
+		//	print_r($nid);
+		 // print_r($tags);	
+		}
+		if($available = grabbit_deals_check_available($tags)){
+		  print $available;
+		  return;	
+		}
+	  }	
+  }
+
+}
+
+
+function grabbit_deals_extract_keywords($string){
+
+    $node=node_load($string);
+    switch($node->type){
+     case 'facebook':
+       $string=$node->field_text[0]['value'];	
+     break;
+     case 'twitter':
+       $string=$node->body;
+     break;	
+     default:
+       $string=$node->title.' '.$node->teaser;
+     break;
+    }
+    $string = cleaner($string);
+    $stopWords = array('i','a','about','an','and','are','before','as','at','be','by','com','de','en','for','from','how','in','is','it','la','of','on','or','that','the','this','to','was','what','when','where','who','will','with','und','the','www',"able", "about", "above", "act", "add", "afraid", "after", "again", "against", "age", "ago", "agree", "all", "almost", "alone", "along", "already", "also", "although", "always", "am", "amount", "an", "and", "anger", "angry", "animal", "another", "answer", "any", "appear", "apple", "are", "arrive", "arm", "arms", "around", "arrive", "as", "ask", "at", "attempt", "aunt", "away", "back", "bad", "bag", "bay", "be", "became", "because", "become", "been", "before", "began", "begin", "behind", "being", "bell", "belong", "below", "beside", "best", "better", "between", "beyond", "big", "body", "bone", "born", "borrow", "both", "bottom", "box", "boy", "break", "bring", "brought", "bug", "built", "busy", "but", "buy", "by", "call", "came", "can", "cause", "choose", "close", "close", "consider", "come", "consider", "considerable", "contain", "continue", "could", "cry", "cut", "dare", "dark", "deal", "dear", "decide", "deep", "did", "die", "do", "does", "dog", "done", "doubt", "down", "during", "each", "ear", "early", "eat", "effort", "either", "else", "end", "enjoy", "enough", "enter", "even", "ever", "every", "except", "expect", "explain", "fail", "fall", "far", "fat", "favor", "fear", "feel", "feet", "fell", "felt", "few", "fill", "find", "fit", "fly", "follow", "for", "forever", "forget", "from", "front", "gave", "get", "gives", "goes", "gone", "good", "got", "gray", "great", "green", "grew", "grow", "guess", "had", "half", "hang", "happen", "has", "hat", "have", "he", "hear", "heard", "held", "hello", "help", "her", "here", "hers", "high", "hill", "him", "his", "hit", "hold", "hot", "how", "however", "I", "if", "ill", "in", "indeed", "instead", "into", "iron", "is", "it", "its", "just", "keep", "kept", "knew", "know", "known", "late", "least", "led", "left", "lend", "less", "let", "like", "likely", "likr", "lone", "long", "look", "lot", "make", "many", "may", "me", "mean", "met", "might", "mile", "mine", "moon", "more", "most", "move", "much", "must", "my", "near", "nearly", "necessary", "neither", "never", "next", "no", "none", "nor", "not", "note", "nothing", "now", "number", "of", "off", "often", "oh", "on", "once", "only", "or", "other", "ought", "our", "out", "please", "prepare", "probable", "pull", "pure", "push", "put", "raise", "ran", "rather", "reach", "realize", "reply", "require", "rest", "run", "said", "same", "sat", "saw", "say", "see", "seem", "seen", "self", "sell", "sent", "separate", "set", "shall", "she", "should", "side", "sign", "since", "so", "sold", "some", "soon", "sorry", "stay", "step", "stick", "still", "stood", "such", "sudden", "suppose", "take", "taken", "talk", "tall", "tell", "ten", "than", "thank", "that", "the", "their", "them", "then", "there", "therefore", "these", "they", "this", "those", "though", "through", "till", "to", "today", "told", "tomorrow", "too", "took", "tore", "tought", "toward", "tried", "tries", "trust", "try", "turn", "two", "under", "until", "up", "upon", "us", "use", "usual", "various", "verb", "very", "visit", "want", "was", "we", "well", "went", "were", "what", "when", "where", "whether", "which", "while", "white", "who", "whom", "whose", "why", "will", "with", "within", "without", "would", "yes", "yet", "you", "young", "your", "br", "img", "p","lt", "gt", "quot", "copy");
+    $string = preg_replace('/ss+/i', '', $string);       
+    $string = trim($string); // trim the string 
+    $string = preg_replace('/[^a-zA-Z0-9 -]/', '', $string); // only take alphanumerical characters, but keep the spaces and dashes too…       
+    $string = strtolower($string); // make it lowercase     
+    
+    preg_match_all('/\b.*?\b/i', $string, $matchWords);       
+    $matchWords = $matchWords[0]; 
+    
+    foreach ( $matchWords as $key=>$item ) {           
+	  if ( $item == '' || in_array(strtolower($item), $stopWords) || strlen($item) <= 3 ) {               
+		unset($matchWords[$key]);           
+	  }       
+    }  
+
+    $wordCountArr = array();       
+    
+    if ( is_array($matchWords) ) {           
+	  foreach ( $matchWords as $key => $val ) {               
+		$val = strtolower($val);               
+		if ( isset($wordCountArr[$val]) ) {                   
+			$wordCountArr[$val]++;               
+		} else {                   
+			$wordCountArr[$val] = 1;               
+	    }           
+	  }       
+    }
+
+    arsort($wordCountArr);       
+    $wordCountArr = array_slice($wordCountArr, 0, 2);       
+    return $wordCountArr;   
+}
+
+function containsTLD($string) {
+  preg_match(
+    "/(AC($|\/)|\.AD($|\/)|\.AE($|\/)|\.AERO($|\/)|\.AF($|\/)|\.AG($|\/)|\.AI($|\/)|\.AL($|\/)|\.AM($|\/)|\.AN($|\/)|\.AO($|\/)|\.AQ($|\/)|\.AR($|\/)|\.ARPA($|\/)|\.AS($|\/)|\.ASIA($|\/)|\.AT($|\/)|\.AU($|\/)|\.AW($|\/)|\.AX($|\/)|\.AZ($|\/)|\.BA($|\/)|\.BB($|\/)|\.BD($|\/)|\.BE($|\/)|\.BF($|\/)|\.BG($|\/)|\.BH($|\/)|\.BI($|\/)|\.BIZ($|\/)|\.BJ($|\/)|\.BM($|\/)|\.BN($|\/)|\.BO($|\/)|\.BR($|\/)|\.BS($|\/)|\.BT($|\/)|\.BV($|\/)|\.BW($|\/)|\.BY($|\/)|\.BZ($|\/)|\.CA($|\/)|\.CAT($|\/)|\.CC($|\/)|\.CD($|\/)|\.CF($|\/)|\.CG($|\/)|\.CH($|\/)|\.CI($|\/)|\.CK($|\/)|\.CL($|\/)|\.CM($|\/)|\.CN($|\/)|\.CO($|\/)|\.COM($|\/)|\.COOP($|\/)|\.CR($|\/)|\.CU($|\/)|\.CV($|\/)|\.CX($|\/)|\.CY($|\/)|\.CZ($|\/)|\.DE($|\/)|\.DJ($|\/)|\.DK($|\/)|\.DM($|\/)|\.DO($|\/)|\.DZ($|\/)|\.EC($|\/)|\.EDU($|\/)|\.EE($|\/)|\.EG($|\/)|\.ER($|\/)|\.ES($|\/)|\.ET($|\/)|\.EU($|\/)|\.FI($|\/)|\.FJ($|\/)|\.FK($|\/)|\.FM($|\/)|\.FO($|\/)|\.FR($|\/)|\.GA($|\/)|\.GB($|\/)|\.GD($|\/)|\.GE($|\/)|\.GF($|\/)|\.GG($|\/)|\.GH($|\/)|\.GI($|\/)|\.GL($|\/)|\.GM($|\/)|\.GN($|\/)|\.GOV($|\/)|\.GP($|\/)|\.GQ($|\/)|\.GR($|\/)|\.GS($|\/)|\.GT($|\/)|\.GU($|\/)|\.GW($|\/)|\.GY($|\/)|\.HK($|\/)|\.HM($|\/)|\.HN($|\/)|\.HR($|\/)|\.HT($|\/)|\.HU($|\/)|\.ID($|\/)|\.IE($|\/)|\.IL($|\/)|\.IM($|\/)|\.IN($|\/)|\.INFO($|\/)|\.INT($|\/)|\.IO($|\/)|\.IQ($|\/)|\.IR($|\/)|\.IS($|\/)|\.IT($|\/)|\.JE($|\/)|\.JM($|\/)|\.JO($|\/)|\.JOBS($|\/)|\.JP($|\/)|\.KE($|\/)|\.KG($|\/)|\.KH($|\/)|\.KI($|\/)|\.KM($|\/)|\.KN($|\/)|\.KP($|\/)|\.KR($|\/)|\.KW($|\/)|\.KY($|\/)|\.KZ($|\/)|\.LA($|\/)|\.LB($|\/)|\.LC($|\/)|\.LI($|\/)|\.LK($|\/)|\.LR($|\/)|\.LS($|\/)|\.LT($|\/)|\.LU($|\/)|\.LV($|\/)|\.LY($|\/)|\.MA($|\/)|\.MC($|\/)|\.MD($|\/)|\.ME($|\/)|\.MG($|\/)|\.MH($|\/)|\.MIL($|\/)|\.MK($|\/)|\.ML($|\/)|\.MM($|\/)|\.MN($|\/)|\.MO($|\/)|\.MOBI($|\/)|\.MP($|\/)|\.MQ($|\/)|\.MR($|\/)|\.MS($|\/)|\.MT($|\/)|\.MU($|\/)|\.MUSEUM($|\/)|\.MV($|\/)|\.MW($|\/)|\.MX($|\/)|\.MY($|\/)|\.MZ($|\/)|\.NA($|\/)|\.NAME($|\/)|\.NC($|\/)|\.NE($|\/)|\.NET($|\/)|\.NF($|\/)|\.NG($|\/)|\.NI($|\/)|\.NL($|\/)|\.NO($|\/)|\.NP($|\/)|\.NR($|\/)|\.NU($|\/)|\.NZ($|\/)|\.OM($|\/)|\.ORG($|\/)|\.PA($|\/)|\.PE($|\/)|\.PF($|\/)|\.PG($|\/)|\.PH($|\/)|\.PK($|\/)|\.PL($|\/)|\.PM($|\/)|\.PN($|\/)|\.PR($|\/)|\.PRO($|\/)|\.PS($|\/)|\.PT($|\/)|\.PW($|\/)|\.PY($|\/)|\.QA($|\/)|\.RE($|\/)|\.RO($|\/)|\.RS($|\/)|\.RU($|\/)|\.RW($|\/)|\.SA($|\/)|\.SB($|\/)|\.SC($|\/)|\.SD($|\/)|\.SE($|\/)|\.SG($|\/)|\.SH($|\/)|\.SI($|\/)|\.SJ($|\/)|\.SK($|\/)|\.SL($|\/)|\.SM($|\/)|\.SN($|\/)|\.SO($|\/)|\.SR($|\/)|\.ST($|\/)|\.SU($|\/)|\.SV($|\/)|\.SY($|\/)|\.SZ($|\/)|\.TC($|\/)|\.TD($|\/)|\.TEL($|\/)|\.TF($|\/)|\.TG($|\/)|\.TH($|\/)|\.TJ($|\/)|\.TK($|\/)|\.TL($|\/)|\.TM($|\/)|\.TN($|\/)|\.TO($|\/)|\.TP($|\/)|\.TR($|\/)|\.TRAVEL($|\/)|\.TT($|\/)|\.TV($|\/)|\.TW($|\/)|\.TZ($|\/)|\.UA($|\/)|\.UG($|\/)|\.UK($|\/)|\.US($|\/)|\.UY($|\/)|\.UZ($|\/)|\.VA($|\/)|\.VC($|\/)|\.VE($|\/)|\.VG($|\/)|\.VI($|\/)|\.VN($|\/)|\.VU($|\/)|\.WF($|\/)|\.WS($|\/)|\.XN--0ZWM56D($|\/)|\.XN--11B5BS3A9AJ6G($|\/)|\.XN--80AKHBYKNJ4F($|\/)|\.XN--9T4B11YI5A($|\/)|\.XN--DEBA0AD($|\/)|\.XN--G6W251D($|\/)|\.XN--HGBK6AJ7F53BBA($|\/)|\.XN--HLCJ6AYA9ESC7A($|\/)|\.XN--JXALPDLP($|\/)|\.XN--KGBECHTV($|\/)|\.XN--ZCKZAH($|\/)|\.YE($|\/)|\.YT($|\/)|\.YU($|\/)|\.ZA($|\/)|\.ZM($|\/)|\.ZW)/i",
+    $string,
+    $M);
+  $has_tld = (count($M) > 0) ? true : false;
+  return $has_tld;
+}
+
+function cleaner($url) {
+  $U = explode(' ',$url);
+
+  $W =array();
+  foreach ($U as $k => $u) {
+    if (stristr($u,".")) { //only preg_match if there is a dot    
+      if (containsTLD($u) === true) {
+      unset($U[$k]);
+      return cleaner( implode(' ',$U));
+    }      
+    }
+  }
+  return implode(' ',$U);
+}
+
+
+// estracts the matching tags of a node/userprofile
+function grabbit_deals_extract_tags($nid, $uid){
+	
+	$node=node_load($nid);
+	$profile = content_profile_load('profile', $uid);
+	
+	if($node->nid && $profile->nid){
+		
+	  // creates an array of tags from the node
+	  $node_tags = array();
+	  if(is_array($node->taxonomy)){
+	    foreach($node->taxonomy as $node_tag){
+		  $node_tags[]=$node_tag->name;
+	    }	
+	  }
+	  
+	  // creates an array of tags from the user profile
+	  $profile_tags = array();
+	  if(is_array($profile->taxonomy)){
+		  foreach($profile->taxonomy as $profile_tag){
+		    $profile_tags[]=$profile_tag->name;	
+		  }
+	  }
+	
+	  $result=array_intersect($profile_tags, $node_tags);
+	  if(is_array($result)){
+		  return implode(', ',$result);
+	  }else{
+	    return NULL;	
+	  }
+	
+	}else{
+		return 1; // the user has no profile or the parameters were incorrect
+	}
+}
+
+function grabbit_deals_open_and_track(){
+	$asin = arg(2);
+	if(isset($asin)){
+		require_once 'amazon/amazon_api_class.php';
+		  $api = new AmazonProductAPI();
+
+		  try
+		  {
+		    $result = $api->getItemByAsin($asin);
+		    $deal = $result->Items->Item;
+		  }
+		  catch (Exception $e)
+		  {
+		    echo $e->getMessage();
+		  }
+		  if($deal->DetailPageURL){
+			grabbit_statistics_save_deal_prog(base_path().'deals/open/'.$asin,$deal->ItemAttributes->ListPrice->FormattedPrice);
+		    drupal_goto($deal->DetailPageURL);	
+		  }
+	 }
+	 return NULL;
+}

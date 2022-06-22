@@ -1,0 +1,300 @@
+<?php
+
+function grabbit_landing_menu()
+{
+  $items['resource/display'] = array(
+    'page callback' => 'grabbit_landing_display', 
+    'title' => t('Element'),
+    'access arguments' => array('access content')
+  );
+  
+  return $items;
+}
+
+function grabbit_landing_display(){
+	global $user;
+	if(arg(2)=='update'){
+	//	print_r(arg(3));
+	  	$node=db_query("SELECT * FROM {grabbit_me} WHERE faid=%d",arg(3));	
+	
+	$node=db_fetch_object($node);    
+	$node->type='update';
+	}else{
+		$node=node_load(arg(2));
+	}
+	
+	/*if($node->uid!=$user->uid){ // dont allow others to see yout shit
+		return $output;
+	}*/
+	$variables=array('user_name'=>$node->name, 'user_type'=>$node->type);
+	drupal_add_js($variables,'setting');
+	drupal_add_js(drupal_get_path('module', 'grabbit_landing').'/resource_engine.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	switch($node->type){
+		case 'facebook':
+		  return grabbit_landing_display_facebook($node);
+		break;
+		case 'twitter':
+		  return grabbit_landing_display_twitter($node);
+		break;
+		case 'media':
+		case 'update':
+		  return grabbit_landing_display_update($node);
+		break;
+	}
+}
+
+function grabbit_landing_display_facebook($node)
+{
+  global $user;
+
+  $module_name='facebook_grabbit';
+  require_once(drupal_get_path('module', $module_name)."/facebook/facebook.php");
+  require_once(drupal_get_path('module', $module_name)."/facebook/facebook_desktop.php");
+  include(drupal_get_path('module', $module_name)."/facebook/config.php");
+  $app_id='90953553995';
+	
+  $fuser = facebook_grabbit_get_fid($user->uid);
+	
+	try{
+		  $facebook = new FacebookDesktop($api_key, $secret);
+		  $facebook->set_user($fuser->fid, $fuser->kid);
+		  
+	  }catch(FacebookRestClientException $e){
+		    drupal_set_message("Ooops! you exeeded the facebook api calls, try again latter.","error");
+	  }
+
+  $actor=array('name'=>$node->field_user_name[0]['value'],
+               'url'=>$node->field_user_url[0]['value'],
+	           'pic_square'=>$node->field_user_picture[0]['value']
+  );
+
+  $commenta=array();
+  $actors=array();
+
+  if($node->field_comments[0]['value']){
+		$profiles=unserialize($node->field_comments[0]['value']);
+		$commenta=$profiles['comments'];	
+		$actors=$profiles['profiles'];
+  }
+
+  $target='';
+  if($node->field_target[0]['value'])
+    $target=$node->field_target[0]['value'];
+                                         
+  $output .= grabbit_langing_facebook_update($node,$actor,$target,$actors,$commenta,$facebook,$fuser->kid);
+  $comments=array();
+
+  return $output;
+
+}
+
+function grabbit_langing_facebook_update($post,$user,$target,$profiles,$comenta,$facebook,$session_key){
+	global $base_path;
+	global $user_info;
+	$attachment = '';
+    $attachment_array=unserialize($post->field_attachment[0]['value']);
+	
+	if($attachment_array['name'])
+	  $attachment_title ='<div class="facebook-attach-title">'.$attachment_array['name'].'</div>';
+	
+	if($attachment_array['description'])
+	  $attachment .='<span class="facebook-attach-text">'.$attachment_array['description'].'</span>';
+
+    if($attachment_array['media']!=''){
+	  	foreach($attachment_array['media'] as $media){
+	      if($media['type'] =="photo"){
+		    try{
+			  	$fb_photo=$facebook->api_client->call_method('facebook.Photos.get', array('session_key' => $session_key,
+			                                                                              'pids'=>$media['photo']['pid']));
+			if(is_array($fb_photo))
+				$attachment .='<span class="facebook-attach-photo"><img src="'.$fb_photo[0]['src_big'].'" /></span>';
+		    }catch(FacebookRestClientException $e){
+			   $e;
+		    }
+		    
+	      }
+		  if($media['type'] =="link"){
+		    $attachment .='<span class="facebook-attach-link"><img src="'.$media['src'].'" /></span>';
+	      }
+	      if($media['type'] =="video"){
+		    $attachment .='<span class="facebook-attach-video" style="height:500px"><br>
+		                   '.swf($media['video']['source_url'], array('params' => array('width' => '450', 'height'=>'300'),'flashvars'=>array('image'=>$media['src']))).'
+		                   </span>';
+	      }
+		}
+    }
+
+	$msg=$post->field_text[0]['value'];
+	$msg_formatted=get_url_msg_formatted($msg);
+	
+	if(count($comenta)>0){
+		$coments_number=0;
+		foreach($comenta as $comment){
+			
+			$show_comments .='<div id="'.$comment['id'].'" class="facebook-comments clearfix"><a target="_blank" title="'.$profiles[$comment['fromid']]['name'].'" class="facebook-image-comment" href="'.$profiles[$comment['fromid']]['url'].'"><span class="facebook-user-pic"><img class="facebook-image-comm" alt="'.$profiles[$comment['fromid']]['name'].'" src="'.$profiles[$comment['fromid']]['pic_square'].'" width="30"/></span></a>
+				<span class="facebook-comment-timeline"><a target="_blank" title="'.$profiles[$comment['fromid']]['name'].'" class="facebook-comment-link" href="'.$profiles[$comment['fromid']]['url'].'">'.$profiles[$comment['fromid']]['name'].'</a></span>
+				<span class="facebook-comment-text">'.$comment['text'].'</span><span class="facebook-date">on '.format_date($comment['time']).'</span>';
+			
+			$show_comments .= '</div>';
+			$coments_number++;						
+		}	
+	}
+	if($coments_number>0){
+		$comments_data='<div class="comments-data"><span class="numerito-comment">'.$coments_number.'</span><a href="JavaScript:void(0);" class="show-comment-link">Show</a></div>';
+		$show_comments='<div class="facebook-post-comments clearfix"><div class="display-comments-buttons" >'.$show_comments.'</div></div>';
+	}else{
+		$show_comments='<div class="display-comments-buttons" >'.$show_comments.'</div>';
+	}
+	
+	
+	// Output for aplication updates
+	
+	$output = '<div class="backto"><a href="'.$base_path.'" class="backtostream">Back to stream</a></div>
+		<div id="tags-show-'.$post->nid.'"></div>
+		<div id="article-news">
+		  <a href="JavaScript:void(0);" title="delete" class="trash-facebook" face_id="'.$post->nid.'">TR</a>
+		  <a href="JavaScript:void(0);" title="retweet" class="retweet-facebook">RT</a>
+		  <a href="javascript:void(0);" title="comment" class="facebook-makecomment-link">Post a comment</a>
+		  <a href="javascript:void(0);" title="add/edit tags" class="bring-tags iconchange" node="'.$post->nid.'"></a>
+		  <span class="url-deal iconchange"><a href="#" title="check deals" node="'.$post->nid.'" >Deal</a></span>
+		  <span class="flag-wrapper flag-bookmarks">'.flag_create_link('bookmarks', $post->nid).'	</span>
+		</div>
+	<div class="facebook-post clearfix '.$post->rowx.' stream-node" id="node-'.$post->created.'">
+	<div class="facebook-post-header clearfix">
+	  <a target="_blank" title="'.$post->field_user_name[0]['value'].'" class="facebook-story-pic"  href="'.$post->field_user_url[0]['value'].'"><span class="facebook-user-pic"><img target="_blank" class="facebook-image-s" alt="'.$post->field_user_name[0]['value'].'" src="'.$post->field_user_picture[0]['value'].'" width="48"/></span></a>
+	  <div class="facebook-with-target"><a target="_blank" title="'.$post->field_user_name[0]['value'].'" class="facebook-story-name" href="'.$post->field_user_url[0]['value'].'"><span class="facebook-user-name">'.$post->field_user_name[0]['value'].'</span></a>'.$target.'</div>
+	
+	  <div class="facebook-post-body">
+	  
+	    <div class="retweet-hide" style="display:none;">'.$msg_formatted.'</div>
+	    <div class="content-truncated">';
+	if($msg_formatted){
+	  $output .='<div class="facebook-post-inside-body">'.$msg_formatted.'</div>';
+	}
+	
+	$output .= $attachment_title.'
+		<span class="facebook-date">on '.format_date($post->created).'</span>
+	  </div>
+	  
+	    </div>
+  </div><!-- /facebook-post-header -->
+  
+	';
+	if($attachment){
+	  	$output .='<div class="facebook-post-sux">
+
+		  <div class="facebook-attachment">'.$attachment.'</div>
+		</div>';	
+	}
+	
+	
+	$output .='</div>
+	  <div class="frost clearfix">
+	    '.$comments_data.'
+	  </div>
+	  '.$show_comments.'
+	  <div class="facebook-comment-form">
+	  <div class="facebook-form">
+	  	<h2>Post new comment</h2>
+		  <form id="myForm">
+			  <textarea id="comment" class="form-text" size=30 maxlength=255 required=true></textarea>
+			  <input nid="'.$post->nid.'" id="'.$post->field_post_id[0]['value'].'" class="facebook_comment_submit_landing" type="button" value="Comment" onclick="javascript:void(0)">
+		  </form>
+	  </div>
+	  
+	</div>
+	</div>';
+	
+	return $output;
+	
+}
+function grabbit_landing_display_twitter($node){  
+    global $base_path;
+	$msg = $node->body;
+	
+	preg_match("/(http:\/\/twitpic\.com\/)(.*$)/i",$msg,$matches);
+	
+	if(is_array($matches)){
+		$string = substr($matches[2],0,6);
+		$twitimage='<img src="http://twitpic.com/show/full/'.$string.'" />';
+	}
+	
+	if($twitimage=='<img src="http://twitpic.com/show/full/" />'){
+		$twitimage='';
+	}
+	$msg_formatted=get_url_msg_formatted($msg,$node);
+	
+	$screen_name=str_replace('http://www.twitter.com/','',$node->field_twitter_url[0]['value']);
+	$output = '<div class="backto"><a href="'.$base_path.'" class="backtostream">Back to stream</a></div>
+		<div id="tags-show-'.$node->nid.'"></div>
+		<div id="article-news">
+		  <a href="JavaScript:void(0);" class="trash-twitter" title="delete" tweet_id="'.$node->nid.'">TR</a>
+		  <a href="JavaScript:void(0);" class="retweet" title="retweet">RT</a>
+		  <a href="javaScript:void(0);" class="twit-reply" title="reply" id="@'.$screen_name.'">Reply This</a>
+		  <a href="javascript:void(0);" class="bring-tags iconchange" title="show/edit tags" node="'.$node->nid.'"></a>
+		  <span class="url-deal iconchange"><a href="#" title="check deals" node="'.$node->nid.'" >Deal</a></span>
+		  <span class="flag-wrapper flag-bookmarks">'.flag_create_link('bookmarks', $node->nid).'</span>
+		</div>
+	<div id="node-'.$node->created.'" class="twitter-message-stream clearfix '.$node->rowx.' stream-node">
+		 
+		<div class="twitter-post clearfix">
+	            
+	             ';
+	
+	$output .='<div class="listable"><span class="twitter-image"><img width="48" src="'.$node->field_twitter_picture[0]['value'].'" /></span></div>
+	            <a href="'.$node->field_twitter_url[0]['value'].'" class="twitter-name-link" target="_blank">'.$node->field_twitter_name[0]['value'].'</a>
+	            <div class="twitter-body">
+	            	<div class="twitter-body-contains">'.$msg_formatted. '</div> 
+	              	<span class="twitter-date">on '. format_date($node->created) . '</span>
+	            </div>
+	   </div>
+	            <div class="twitpic">'.$twitimage.'</div>
+			  </div>';
+		
+	return $output;
+}
+
+function grabbit_landing_display_update($node){  
+global $base_path;
+    $item=unserialize($node->extra);
+	$msg = $item['status'];
+	if($item['facebook'])
+	  $social_networks .='<span class="from-facebook"><img src="'.base_path().'sites/all/themes/grabbit/images/various/facebook_ico_sml.gif" alt="Facebook Account" /></span>';
+
+	if($item['twitter'])
+	  $social_networks .='<span class="from-twitter"> <img src="'.base_path().'sites/all/themes/grabbit/images/various/twitter_ico_sml.gif" alt="Twitter Account" /></span>';
+	
+	preg_match("/(http:\/\/twitpic\.com\/)(.*$)/i",$msg,$matches);
+	if(is_array($matches)){
+		$twitimage='<img src="http://twitpic.com/show/full/'.$matches[2].'" />';
+	}
+	
+	if($twitimage=='<img src="http://twitpic.com/show/full/" />'){
+		$twitimage='';
+	}
+	$profile=content_profile_load('profile', $node->uid);
+	
+	$msg_formatted=get_url_msg_formatted($msg,$node);
+	
+	$output = '<div class="backto"><a href="'.$base_path.'" class="backtostream">Back to stream</a></div><div id="node-'.$node->number.'" class="twitter-message-stream clearfix '.$node->rowx.' stream-node">
+		
+		<div id="article-news">
+		  <a href="JavaScript:void(0);" class="retweet" title="retweet">RT</a>
+		  <a href="javaScript:void(0);" class="twit-reply" title="reply" id="@'.$profile->name.'">Reply This</a>
+		</div>
+		<div class="twitter-post clearfix">';
+	
+	$output .='<div class="listable"><span class="twitter-image">'.theme('imagecache', 'friend_thumbnail', $profile->field_profile_picture[0]['filepath'], 'My Image').'
+	'.$social_networks.'</span></div>
+	            <a href="#" class="twitter-name-link" target="_blank">'.$profile->name.'</a>
+	            <div class="twitter-body">
+	            	<div class="twitter-body-contains">'.$msg_formatted. '</div> 
+	              	<span class="twitter-date">on '. format_date($node->number) . '</span>
+	            </div>
+	   </div>
+	            <div class="twitpic">'.$twitimage.'</div>
+			  </div>';
+		
+	return $output;
+}

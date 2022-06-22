@@ -1,0 +1,293 @@
+<?
+
+/**
+ * Implementation of hook_menu()
+ */
+function grabbit_tags_menu() {
+
+  $items['tags/display'] = array( 
+    'page callback' => 'grabbit_tags_display', 
+    'access arguments' => array('access content')
+  );
+
+  $items['tags/save'] = array( 
+    'page callback' => 'grabbit_tags_save', 
+    'access arguments' => array('access content')
+  );
+
+  $items['tags/profile/save'] = array( 
+    'page callback' => 'grabbit_tags_profile_save', 
+    'access arguments' => array('access content')
+  );
+
+  $items['tags/custom/profile/save'] = array( 
+    'page callback' => 'grabbit_tags_custom_profile_save', 
+    'access arguments' => array('access content')
+  );
+ 
+  $items['tags/profile/one'] = array( 
+    'page callback' => 'grabbit_tags_profile_save_one', 
+    'access arguments' => array('access content')
+  );
+
+  $items['tags/delete'] = array( 
+    'page callback' => 'grabbit_tags_delete', 
+    'access arguments' => array('access content')
+  );
+
+  return $items;
+}
+
+//implementation of hook grabbit_status_form
+function grabbit_tags_grabbit_status_form(){
+	global $user;
+	
+	if($user->uid>0){
+	  drupal_add_js(drupal_get_path('module', 'grabbit_tags').'/tags_engine.js', $type = 'module');		
+	}
+	
+}
+
+function grabbit_tags_display(){
+
+	$nid=$_GET['nid'];
+	$type=$_GET['type'];
+	
+	$keywords = grabbit_deals_extract_keywords($nid);
+		$keys= array_keys($keywords);
+		$keys = implode(', ',$keys);
+	
+	$node=node_load($nid);
+
+	if(is_array($node->tags)){
+	  	foreach($node->tags as  $tag_group){
+			foreach($tag_group as $tag){
+			  $text[$tag->name]=$tag->name;	
+			}
+		}	
+	}
+	if(is_array($node->taxonomy)){
+		foreach($node->taxonomy as $taxo_local){
+			$text[$taxo_local->name]=$taxo_local->name;
+		}
+	}
+
+    if($node->nid){
+	  if(!count($text)){
+	    if($node->type=='twitter' || $node->type=='facebook'){
+		  //$input ='<div class="no-tags">There are no tags in this item, you can add tags using the form below</div>';
+		  $text = '';
+	    } 	
+	  }else{
+		$text = implode(', ',$text);
+	  }
+	  $text .=' '.$keys;
+	  if($node->type!='news'){
+		$allowed='<span class="tags-block"><input type="checkbox" id="save-tags" checked="checked" /> Save tags to item.</span>';
+	  }
+	  $output = '<div class="tags-engine" node="'.$nid.'">
+	            '.$input.'
+	             <a href="#" class="close-tags">Close</a><span class="all-tags">
+	             <span class="tags-legend">Add or edit tags to your settings:</span><span class="tags-instruction">(comma-separated list)</span>
+	             ';
+   
+	  $output .='<textarea id="text-area-'.$nid.'">'.$text.'</textarea>';
+	
+	  $output .= '<span class="checkboxes-tags">
+	              '.$allowed.'
+	              <span class="tags-block"><input type="checkbox" id="add-tags" /> Add tags to my profile.</span>
+	              </span>
+	              <button node="'.$nid.'" class="tags-submit-profile">Add</button></span></div>';
+	  
+	  print $output;
+    }else{
+	  		$output = '<div node="3324208" class="tags-engine">
+
+				             <a class="close-tags" href="#">Close</a><span class="all-tags">
+				             <span class="tags-legend">Add or edit tags to your settings:</span><span class="tags-instruction">(comma-separated list)</span>
+				             <textarea id="text-area-3324208"></textarea><span class="checkboxes-tags">
+				              <span class="tags-block"><input type="checkbox" checked="checked" id="save-tags"> Save tags to item.</span>
+				              <span class="tags-block"><input type="checkbox" id="add-tags"> Add tags to my profile.</span>
+				              </span>
+				              <button class="tags-submit-profile" node="3324208">Add</button></span></div>';
+			print $output;
+    }	
+	
+}
+
+function grabbit_tags_save(){
+	
+	$nid=$_GET['nid'];
+	
+	if($_GET['tags']){
+		$terms=$_GET['tags'];
+		$node=node_load($nid);
+		$node->taxonomy=array();
+		$tags_feeds=explode(",",$terms);  
+		  foreach($tags_feeds as $tag_1){
+
+			    $try=taxonomy_get_term_by_name(trim($tag_1));
+			    if($try->vid){
+				  $node->taxonomy[$try->tid]=$try;		  
+			    }else{
+				  if(count($try)){
+				 	$node->taxonomy[$try[0]->tid]=$try[0];
+				  }else{
+				  	// I create a term in a specific vocabulary
+				    $edit = array('name' => trim($tag_1), 'description' => ' ', 'weight' => "0", 'vid' => 1);
+				    taxonomy_save_term($edit);
+				    $tid = $edit['tid'];
+				    // associate node and term
+				    $node->taxonomy[$tid]=$edit;
+				  }
+				}
+
+		    }
+
+		  @taxonomy_node_save($node, $node->taxonomy);
+
+	    print "OK";	// Everything went smooth
+
+	}else{
+		print "OT"; // No terms sent, so we return a no terms message to handle
+	}	
+}
+
+function grabbit_tags_custom_profile_save(){
+	$tags=$_GET['tags'];
+	
+	if($tags){
+		
+	  global $user;
+	 $profile = content_profile_load('profile', $user->uid);
+      if(!$profile->nid){
+		$profile = new StdClass();
+		$profile->type = 'profile';
+		$profile->uid=$user->uid;
+		$profile->title=$user->name;
+		node_save($profile);
+	  }
+	  $tags_feeds=explode(",",$tags);  
+	  foreach($tags_feeds as $tag_1){
+
+		    $try=taxonomy_get_term_by_name(trim($tag_1));
+		    if($try->vid){
+			  $profile->taxonomy[$try->tid]=$try;		  
+		    }else{
+			  if(count($try)){
+			 	$profile->taxonomy[$try[0]->tid]=$try[0];
+			  }else{
+			  	// I create a term in a specific vocabulary
+			    $edit = array('name' => trim($tag_1), 'description' => ' ', 'weight' => "0", 'vid' => 1);
+			    taxonomy_save_term($edit);
+			    $tid = $edit['tid'];
+			    // associate node and term
+			    $profile->taxonomy[$tid]=$edit;
+			  }
+			}
+
+	    }
+	
+	  @taxonomy_node_save($profile, $profile->taxonomy);
+	  print "OK";
+	
+	}else{
+	  print "OT";
+	}
+}
+
+function grabbit_tags_profile_save(){
+	
+	$nid=$_GET['nid'];
+	
+	if($nid){
+	  	
+	  $node = node_load($nid);
+      global $user;
+
+      $profile = content_profile_load('profile', $user->uid);
+      if(!$profile->nid){
+		$profile = new StdClass();
+		$profile->type = 'profile';
+		$profile->uid=$user->uid;
+		$profile->title=$user->name;
+		node_save($profile);
+	  }
+	
+	  if(is_array($node->tags[3])){
+	    foreach($node->tags[3] as $tag){
+          $profile->taxonomy[$tag->tid]=$tag;
+        }	
+	  }
+
+	  taxonomy_node_save($profile, $profile->taxonomy);
+	  print "OK";
+	
+	}else{
+	  print "OT";
+	}
+	
+}
+
+function grabbit_tags_profile_save_one($tag=FALSE){
+    if(!$tag)
+      $tag=$_GET['tag'];
+
+    if(isset($tag)){
+	  global $user;
+
+      $profile = content_profile_load('profile', $user->uid);
+      if(!$profile->nid){
+		$profile = new StdClass();
+		$profile->type = 'profile';
+		$profile->uid=$user->uid;
+		$profile->title=$user->name;
+		node_save($profile);
+	  }
+	  $tag=trim($tag);
+	// check if the term already exist
+	  	$try=taxonomy_get_term_by_name($tag);
+	
+	    if($try){
+		  if($try->tid){
+		    $profile->taxonomy[$try->tid]=$try;
+		  }elseif(count($try)){
+		 	$profile->taxonomy[$try[0]->tid]=$try[0];
+		  }		  
+	    }else{
+		  $profile->taxonomy['tags'][3]=$tag;
+	    }
+	// end check  
+	  @node_save($profile);
+	  print "OK";
+    }else{
+	  print "OT";
+    }
+}
+
+function grabbit_tags_delete(){
+
+	$nid=$_GET['nid'];
+	
+	if($_GET['tag']){
+	
+		$term=$_GET['tag'];
+		$node=node_load($nid);
+		foreach($node->tags[3] as $tag){
+		  if($tag->name!=$term){
+		    $terms[]=$tag->name;	
+		  }
+		}
+		$terms=implode(',',$terms);
+		$node->taxonomy=array();
+		$node->taxonomy['tags'][3]=$terms;
+        
+        taxonomy_node_save($node, $node->taxonomy);
+
+	    print "OK";	// Everything went smooth
+
+	}else{
+		print "OT"; // No terms sent, so we return a no terms message to handle
+	}
+	
+}

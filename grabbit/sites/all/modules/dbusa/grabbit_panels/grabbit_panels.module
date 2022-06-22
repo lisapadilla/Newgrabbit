@@ -1,0 +1,728 @@
+<?
+//$Id$
+
+
+/**
+ * Implementation of hook_menu()
+ */
+
+function grabbit_panels_menu () {
+
+  $items['panels/edit'] = array( 
+    'page callback' => 'grabbit_panels_edit_panels', 
+    'access arguments' => array('access content')
+  );
+
+  $items['panels/paginate'] = array( 
+    'page callback' => 'grabbit_panels_show_paginate', 
+    'access arguments' => array('access content')
+  );
+
+  $items['panels/ajax'] = array( 
+    'page callback' => 'grabbit_panels_show_ajax', 
+    'access arguments' => array('access content')
+  );
+
+  $items['user/%/myfeeds/add_rss'] = array(
+   'title' => 'Add RSS',
+   'page callback' => 'grabbit_panels_rss',
+   'access arguments' => array('access content'),
+    'load arguments' => array('%map', '%index'),
+   'weight' => 9,
+   'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['user/%/myfeeds/import_rss'] = array(
+   	'title' => 'Import OPML',
+  	'access arguments' => array('access content'),
+    'load arguments' => array('%map', '%index'),
+    'weight' => 10,
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('feedapi_import_opml'),
+    'file' => 'feedapi.opml.inc',
+   'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['user/%/myfeeds/viewfeeds'] = array(
+    'title' => 'My feeds',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'load arguments' => array('%map', '%index'),
+  );
+
+  $items['panels/filters'] = array( 
+    'page callback' => 'grabbit_panels_filters', 
+    'access arguments' => array('access content')
+  );
+
+  $items['panels/delete'] = array( 
+    'page callback' => 'grabbit_panels_delete', 
+    'access arguments' => array('access content')
+  );
+
+  $items['stream/user'] = array( 
+  'page callback' => 'grabbit_panels_get_panels', 
+  'access arguments' => array('access content')
+  );
+
+  $items['favorites/display'] = array( 
+  'title'=>'Favorites',
+  'page callback' => 'grabbit_panels_get_favorites', 
+  'access arguments' => array('access content')
+  );
+
+  return $items;
+}
+
+function grabbit_panels_get_favorites(){
+	global $user;
+	
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_uploads').'/jquery.form.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/engine.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.js', $type = 'module');
+	drupal_add_css(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.css', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+    drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+	
+	$view = views_get_view('flag_bookmarks_tab');
+	$view->set_arguments(array($user->uid));	
+	$view->pager['items_per_page']=30;
+	$view->execute();
+	$twitface=array();
+	if($result = grabbit_favorites_get_all('friend')){
+		while($friend_fav=db_fetch_object($result)){
+			$friend=user_load($friend_fav->id);
+			if($friend_fav->extra){
+			  $twitface[$friend_fav->extra]=array('time'=>$friend->created,
+			                                  'value'=>$friend);
+			}else{
+				$twitface[$friend->created]=array('time'=>$friend->created,
+				                                  'value'=>$friend);
+				
+			}
+		}
+	}
+	
+	foreach($view->result as $node){
+	 
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                                       'value'=>$node);
+    }
+
+    ksort($twitface);
+
+    if(count($twitface)==0){
+	    $mesa=drupal_get_messages();
+		if($mesa['status'][0])
+		  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+
+
+		$resultados = facebook_grabbit_theme_results($twitface);
+            
+			$output .='<div class="panels-controllers">
+			           <div class="title-inline">'.$user->name.'\'s favorites</div>
+			           <div id="panels-pager" class="panels-pager"></div>
+			           <a href="JavaScript:void(0);" class="move-left"></a>
+			           <a href="JavaScript:void(0);" class="move-right"></a>
+			           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">
+			           <div class="panel-favorites"><div class="no-favs">You don\'t have any favorites in grabbit.</div>';
+
+			$output .='</div></div>';
+
+
+		return $output;
+	  
+    }
+
+    $mesa=drupal_get_messages();
+	if($mesa['status'][0])
+	  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+	
+
+	$resultados = facebook_grabbit_theme_results($twitface);
+	
+		$output .='<div class="panels-controllers">
+		           <div class="title-inline">'.$user->name.'\'s favorites</div>
+		           <div id="panels-pager" class="panels-pager"></div>
+		           <a href="JavaScript:void(0);" class="move-left"></a>
+		           <a href="JavaScript:void(0);" class="move-right"></a>
+		           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">
+		           <div class="panel-favorites">';
+		$output .=$resultados;
+	
+		$output .='</div></div>';
+	    
+	
+	return $output;
+}
+
+
+function grabbit_panels_delete(){
+	global $user;
+	
+	if (!$_GET['panel'])
+	  return NULL;
+	
+	$panel = $_GET['panel'];
+	$result = db_query("DELETE FROM {grabbit_panels} WHERE uid = %d AND pid = %d",$user->uid,$panel);
+	print 1;
+}
+
+function grabbit_panels_get_panels(){
+	global $user;
+	
+	if($user->uid>0){
+/*		
+		set_time_limit(328);
+		if($fuser = facebook_grabbit_get_fid($user->uid))
+		  facebook_grabbit_update_facebook($user);
+	
+		if($twitter_account = oauth_twitter_get_uid($user->uid))
+		  facebook_grabbit_update_twitter($user);
+		// EMAILS NO BECAUSE OUR SERVER MELTS DOWN
+	/*	if($gmail_user = grabbit_gmail_get($user->uid))
+		  grabbit_gmail_crear($user->uid);
+		
+		if($imap_user = grabbit_imap_get($user->uid))
+		  grabbit_imap_crear($user->uid);
+	  */
+	}
+
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_uploads').'/jquery.form.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/engine.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.js', $type = 'module');
+	drupal_add_css(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.css', $type = 'module');
+	
+	$panel_1 = facebook_grabbit_private_view_panel(0);	
+	
+	if ($user->uid > 0){
+		$unique=0;
+		$mesa=drupal_get_messages();
+		if($mesa['status'][0])
+		  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+	    $output .= l('<span>Add New&nbsp;&nbsp;</span>','panels/edit/',array('attributes'=>array('class'=>'thickbox add-new-panel'),'query'=>'height=300&width=250', 'html'=>TRUE));
+		$output .='<div class="panels-controllers">
+		           <div id="panels-pager" class="panels-pager"></div>
+		           <a href="JavaScript:void(0);" class="move-left"></a>
+		           <a href="JavaScript:void(0);" class="move-right"></a>
+		           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">';
+		$output .= theme_panels($panel_1,0,"Main Stream");
+		$all_panels=grabbit_panels_get_all_panels($user->uid);
+		if($total_u=db_affected_rows($all_panels)){
+			if($total_u==1)
+			  $unique=1;
+			
+			while($panel = db_fetch_object($all_panels)){
+			  	$settings=grabbit_panels_get_uid($user->uid,$panel->pid);
+				$panel_settings=unserialize($settings->config);
+			    //$panel_2 = facebook_grabbit_private_view_panel($panel->pid);
+			    $panel_2='<div class="panel-content-ajax panel-loading" paid="'.$panel->pid.'"></div>';		
+			    $output .= theme_panels($panel_2,$panel->pid,$panel_settings['panel_name'],$unique);	
+			}	
+		}else{
+			$panel_2 = facebook_grabbit_private_view_panel(1);
+			$output .= theme_panels($panel_2,1,"Filtered Stream");
+		}
+		$output .='</div>';
+	    
+	}
+	else{
+		drupal_add_js(drupal_get_path('module', 'grabbit_tags').'/tags_engine.js', $type = 'module');		
+//		$output = 'performance';
+		if($mesa['status'][0])
+		  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+		
+		$output .='<div class="panels-controllers">
+		           <div id="panels-pager" class="panels-pager"></div>
+		           <a href="JavaScript:void(0);" class="move-left"></a>
+		           <a href="JavaScript:void(0);" class="move-right"></a>
+		           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">';
+		$panel_1 = facebook_grabbit_private_view_panel_public(0);	
+		$output .= theme_panels($panel_1,0,"Public Stream");     
+		$all_panels=grabbit_panels_get_all_panels(53);
+		while($panel = db_fetch_object($all_panels)){
+		  	$settings=grabbit_panels_get_uid(53,$panel->pid);
+			$panel_settings=unserialize($settings->config);
+		    //$panel_2 = facebook_grabbit_private_view_panel_public_panels($panel->pid);
+		    $panel_2='<div class="panel-content-ajax panel-loading" paid="'.$panel->pid.'"></div>';	
+		    $output .= theme_panels($panel_2,$panel->pid,$panel_settings['panel_name'],$unique);	
+		}      		           
+		$output .='</div>';	
+ 
+		
+	}
+	
+	return $output;
+}
+
+function grabbit_panels_show_ajax(){
+	$pid=$_GET['pid'];
+	global $user;
+	if($user->uid==0){
+		print facebook_grabbit_private_view_panel_public_panels($pid);
+	}else{
+		print facebook_grabbit_private_view_panel($pid);
+	}
+}
+
+// show the next set of the panel (pagination)
+function grabbit_panels_show_paginate(){
+	$pid=$_GET['pid'];
+	$page=$_GET['page'];
+
+	$output = facebook_grabbit_private_view_panel_pagination($pid,$page);
+	print $output;
+}
+
+function grabbit_panels_edit_panels(){
+	if(arg(2)){
+		$panel=arg(2);
+		$output = drupal_get_form("grabbit_panels_source_form",$panel);
+		print '<div id="grabbit-panel-source-form" class="grabbit-panels-forms">'.$output.'</div>';	
+	}
+	else{
+		global $user;
+		$panels = grabbit_panels_get_all_panels($user->uid);
+		if(db_affected_rows($panels)>=4){
+		  print "We are sorry. Grabbit is still in beta and your account can only have 4 streams. We will increase this number in the future. Stay tuned!";	
+		}else{
+		  $output = drupal_get_form("grabbit_panels_source_create_form",$panel);
+		  print '<div id="grabbit-panel-create-form" class="grabbit-panels-forms">'.$output."</div>";
+		}
+	}
+}
+
+function grabbit_panels_filters(){
+	$panel=arg(2);
+	
+	$output = drupal_get_form("grabbit_panels_tags_form",$panel);
+	print  '<div id="grabbit-panel-tags-form" class="grabbit-panels-forms">'.$output.'</div>';
+}
+
+
+function grabbit_panels_get_all_panels($user){
+  	$result = db_query("SELECT * FROM {grabbit_panels} WHERE uid = %d ORDER BY pid",$user);
+    return $result;
+}
+
+function grabbit_panels_save_panel($user,$config,$pid){
+  if($pid){
+  	$check = grabbit_panels_get_uid($user,$pid);
+
+	$savetodb = serialize($config);
+
+	if(!$check){
+	  db_query("INSERT INTO {grabbit_panels} (pid,uid,config) VALUES (%d, %d, '%s')",$pid,$user,$savetodb);	
+	  $result = TRUE;
+	}
+	else{
+	  db_query("UPDATE {grabbit_panels} SET config='%s' WHERE uid=%d AND pid= %d",$savetodb,$user,$pid);	
+	  $result = TRUE;
+	}
+	  return $result;	
+  }else{
+	$result = db_query("SELECT * FROM {grabbit_panels} WHERE uid = %d ORDER BY pid DESC LIMIT 1",$user);
+    $last_panel = db_fetch_object($result);
+  	$savetodb = serialize($config);
+    $new_pid=$last_panel->pid+1;
+    db_query("INSERT INTO {grabbit_panels} (pid,uid,config) VALUES (%d, %d, '%s')",$new_pid,$user,$savetodb);	
+	$result = TRUE;
+  }
+	
+}
+
+function grabbit_panels_get_uid($user,$panel){
+
+  $result = db_query("SELECT * FROM {grabbit_panels} WHERE uid = %d AND pid = %d",$user,$panel);
+
+  if ($user = db_fetch_object($result)) {
+	$user = $user;
+  }
+  else{
+    $user = FALSE;	
+  }
+
+  return $user;
+}
+
+function grabbit_panels_save_panel_tags($user,$config,$pid){
+  $check = grabbit_panels_get_uid($user,$pid);
+
+  $savetodb = serialize($config);
+
+  if(!$check){
+    db_query("INSERT INTO {grabbit_panels} (pid,uid,filters) VALUES (%d, %d, '%s')",$pid,$user,$savetodb);	
+    $result = TRUE;
+  }
+  else{
+    db_query("UPDATE {grabbit_panels} SET filters='%s' WHERE uid=%d AND pid= %d",$savetodb,$user,$pid);	
+    $result = TRUE;
+  }
+
+  return $result;
+	
+}
+
+function grabbit_panels_flag($action, $flag, $content_id, $account) {
+  if ($action == 'unflag' && $flag->name == 'myfeeds') {
+	global $user;
+    $panel = db_query("SELECT * from {grabbit_panels} WHERE config LIKE '%$content_id%' AND uid=$user->uid");
+    while($result = db_fetch_object($panel)){
+	  $current_config=$result->config;
+	  $new_config = str_replace($content_id,$current_config,'');
+	  db_query("UPDATE {grabbit_panels} SET config='%s' WHERE pan=%d",$new_config,$result->pan);
+    }  
+  }
+}
+
+/**
+* Generate the configuration form for panels
+*/
+function grabbit_panels_source_form($form,$panel_id){
+	global $user;
+
+	if($_GET['form_id']){
+	  grabbit_panels_save_panel($user->uid,$_GET,arg(2));
+	  drupal_goto("stream/user");
+      return;	
+	}
+	
+	$flag = flag_get_user_flags('node', $content_id = NULL, $uid = $user->uid, $reset = FALSE);
+ 
+	if(is_array($flag['myfeeds'])){
+		foreach($flag['myfeeds'] as $term){
+			$nodo = node_load($term->content_id);
+			if($nodo->nid)
+			  $terms[$nodo->nid]=$nodo->title;
+		}	
+	}
+	else{
+		$terms=array();
+	}
+	
+	$panels=array();
+    $feeds=array();
+	if($panel = grabbit_panels_get_uid($user->uid,$panel_id)){
+	  $panels=unserialize($panel->config);
+	  if($panels['feeds'])
+	    $feeds=$panels['feeds'];
+	}
+	
+	$form['panel_name'] = array(
+	    '#type'=> 'textfield',
+		'#title' => t('Panel Name'),
+		'#size'=>12,
+		'#default_value' => $panels['panel_name']
+	    );  
+
+	$form['show_facebook'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('Show Facebook'),
+		'#default_value' => $panels['show_facebook']
+	    );
+	
+	$form['show_twitter'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('Show Twitter'),
+		'#default_value' => $panels['show_twitter']
+	    );
+	
+		$form['show_gmail'] = array(
+		    '#type'=> 'checkbox',
+			'#title' => t('Show Gmail'),
+			'#default_value' => $panels['show_gmail']
+		    );
+		
+			$form['show_imap'] = array(
+			    '#type'=> 'checkbox',
+				'#title' => t('Show IMAP'),
+				'#default_value' => $panels['show_imap']
+			    );
+	
+	
+	/*$form['favorites'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('Only Favorites'),
+		'#default_value' => $panels['favorites']
+	    );
+	*/
+	$form['feeds'] = array(
+	    '#type'=> 'checkboxes',
+	    '#title'=>'My Feeds',
+	    '#options'=> $terms,
+	    '#default_value'=> $feeds,
+	    '#description'=> l('Modify my Feeds','user/'.$user->uid.'/myfeeds'),
+	    );
+	
+	$form['submit'] = array('#type' => 'submit', 
+	                        '#value' => t('Save'));
+
+	$form['#method'] = 'get';
+		
+	return $form;
+}
+
+/**
+* Generate the creation form for panels
+*/
+function grabbit_panels_source_create_form($form,$panel_id){
+	global $user;
+
+	if($_GET['form_id']){
+	  grabbit_panels_save_panel($user->uid,$_GET,NULL);
+	  drupal_goto("stream/user");
+      return;	
+	}
+	
+	$form['instructions'] = array(
+	    '#type'=> 'item',
+	    '#prefix'=>'<div id="new-stream-instruction">',
+	    '#suffix'=>'</div>',
+		'#title' => t('Create new stream')
+	    );
+	
+	$flag = flag_get_user_flags('node', $content_id = NULL, $uid = $user->uid, $reset = FALSE);
+
+	if(is_array($flag['myfeeds'])){
+		foreach($flag['myfeeds'] as $term){
+			$nodo = node_load($term->content_id);
+			if($nodo->nid)
+			  $terms[$nodo->nid]=$nodo->title;
+		}	
+	}
+	else{
+		$terms=array();
+	}
+	
+	$panels=array();
+    $feeds=array();
+	
+	$form['panel_name'] = array(
+	    '#type'=> 'textfield',
+		'#title' => t('Panel Name'),
+		'#size'=>12,
+		'#default_value' => $panels['panel_name']
+	    );  
+
+	$form['show_facebook'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('Show Facebook'),
+		'#default_value' => $panels['show_facebook']
+	    );
+	
+	$form['show_twitter'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('Show Twitter'),
+		'#default_value' => $panels['show_twitter']
+	    );
+	
+		$form['show_gmail'] = array(
+		    '#type'=> 'checkbox',
+			'#title' => t('Show Gmail'),
+			'#default_value' => $panels['show_gmail']
+		    );
+		
+				$form['show_imap'] = array(
+				    '#type'=> 'checkbox',
+					'#title' => t('Show IMAP'),
+					'#default_value' => $panels['show_imap']
+				    );
+	
+	
+	/*$form['favorites'] = array(
+	    '#type'=> 'checkbox',
+		'#title' => t('Only Favorites'),
+		'#default_value' => $panels['favorites']
+	    );
+	*/
+	$form['feeds'] = array(
+	    '#type'=> 'checkboxes',
+	    '#title'=>'My Feeds',
+	    '#options'=> $terms,
+	    '#default_value'=> $feeds,
+	    '#description'=> l('Modify my Feeds','user/'.$user->uid.'/myfeeds'),
+	    );
+	
+	$form['submit'] = array('#type' => 'submit', 
+	                        '#value' => t('Save'));
+
+	$form['#method'] = 'get';
+		
+	return $form;
+}
+
+/**
+* Generate the MORE TAGS form
+*/
+function grabbit_panels_tags_form($form,$panel_id){
+	global $user;
+	
+	$taxonomy = taxonomy_get_tree(3);
+	foreach($taxonomy as $tax){
+	  $popular_tags[$tax->tid]=$tax->name;
+	}
+
+	$panels=array();
+	if($_GET['form_id']){
+	  grabbit_panels_save_panel_tags($user->uid,$_GET,arg(2));
+	  drupal_goto("panels_show");
+      return;	
+	}
+	
+	if($panel = grabbit_panels_get_uid($user->uid,$panel_id)){
+		$pan=unserialize($panel->filters);
+		if($pan['tags']){
+			$panels=$pan['tags'];
+		}
+	}
+	  
+
+	$form['tags'] = array(
+	    '#type'=> 'checkboxes',
+	    '#title'=>'Filter Tags',
+	    '#options'=> $popular_tags,
+	    '#default_value'=> $panels,
+	    '#attributes'=>array('class'=>'multiple-tags-stream clearfix')
+	    );
+	
+	$form['submit'] = array('#type' => 'submit', 
+	                        '#value' => t('Filter'));
+
+	$form['#method'] = 'get';
+		
+	return $form;
+}
+
+
+function theme_panels($private_view,$id,$name,$unique=0){
+	
+    global $user;
+
+      $clooser='<a href="javascript:void(0)" panelid="'.$id.'" class="panel-closer">Delete</a>';
+
+    if(!$name)
+      $name="Panel ".$id;
+
+	if($user->uid != 0){
+		$output = '<div class="panel-grabbit user-panel" id="panel-'.$id.'" pager="0" pid="'.$id.'">
+	             <div class="panel-title clearfix">
+	               <div class="controller-top"> <h3 class="title">'.$name.'</h3>';
+	      if($name!='Main Stream'){
+		    $output .= "<ul class='dropdown'><li class='dir panel-gear'><ul><li>".l('<span>Edit</span>','panels/edit/'.$id,array('attributes'=>array('class'=>'thickbox'),'query'=>'height=300&width=250', 'html'=>TRUE)).'
+		                    </li><li>'.$clooser.'</li></ul></li></ul>';
+						$output .=l('<span>Edit Filters</span>','panels/filters/'.$id,array('attributes'=>array('class'=>'thickbox panel-filters'),'query'=>'height=300&width=250', 'html'=>TRUE)).'</div>';
+		   }else{
+			    $output .=l('<span>Edit Filters</span>','panels/filters/'.$id,array('attributes'=>array('class'=>'thickbox panel-filters'),'query'=>'height=300&width=250', 'html'=>TRUE)).'</div>';
+		    }
+           
+			$output .= '</div>
+	             <div class="panel-wraper">
+	             		'.$private_view.'</div>
+	           </div>';
+	           
+	}else{
+		if ($name == 'Most Visited'){
+			$output = '<div class="panel-grabbit panel-most-visited user-panel" id="panel-'.$id.'">';
+		}else{
+			$output = '<div class="panel-grabbit user-panel" id="panel-'.$id.'">';
+		}
+		$output .= ' <div class="panel-title clearfix">
+	               <h3 class="title">'.$name.'</h3>';
+	            
+	  $output .='</div>
+	             		<div class="panel-wraper">'.$private_view.'</div>
+	            
+	           	 </div>';
+	}
+	             
+	
+	
+	return $output;
+}
+
+function grabbit_panels_rss(){
+
+	 global $user;
+	 
+	 $type = 'feed';
+	 $node = array('uid' => $user->uid, 'name' => $user->name, 'type' => $type);
+	 module_load_include('inc', 'node', 'node.pages');
+	 $form = drupal_get_form($type .'_node_form',  $node);
+
+	 return $form;
+	 
+}
+
+
+
+function grabbit_panels_form_alter($form,$form_state,$form_id){
+	if($form_id=='feed_node_form'){
+		unset($form['body_field']);
+		$form['#redirect'] = 'user/me/myfeeds';
+		global $user;
+		$panels = grabbit_panels_get_all_panels($user->uid);
+		if(db_affected_rows($panels)>=4){
+		 	
+		}else{
+		 	$form['feedapi']['feedapi_panel'] = array(
+		        '#type' => 'checkbox',
+		        '#title' => t('Create a panel from this RSS feed'),
+		        '#description' => t('Create a panel from this RSS feed Let Grabbit create a stream for you containing the items from this RSS feed. You can delete/edit this stream later.'),
+		        '#default_value' => 1
+		      );
+		    $form['#validate'][] = 'grabbit_panels_node_validate';
+		}
+		
+	}
+}
+
+
+function grabbit_panels_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL){
+	if($op == 'insert'){
+		
+		if($node->type=='feed'){
+			ini_set("memory_limit","512M");
+			$elements = array();
+			  if ($merged_item = _feedapi_mapper_get_items_merged($node)) {
+			    $merged_item = _feedapi_mapper_simplify_raw($merged_item, $node->feed->parsers);
+			  }
+			
+			while (count($merged_item)) {
+			    $path = array();
+			    $path = _feedapi_mapper_next_element_path($merged_item, $path, TRUE);
+				
+			    if ($path == FALSE) {
+			      break;
+			    }
+			    $elements[implode('->', $path)] = serialize($path);
+			    if((in_array('media:content',$path) || in_array('media:thumbnail',$path)) && in_array('@url',$path))
+			     $image=implode('->', $path);
+			  }
+			
+			$target_field='a:2:{i:0;s:7:"content";i:1;s:18:"field_image_inline";}';
+			if($image)
+			  feedapi_mapper_add_mapping($node->nid,$elements[$image],$target_field);
+			
+			   $flag = flag_get_flag('myfeeds') or die('no flag defined');
+			   $flag->flag('flag', $node->nid);
+			
+				if ($node->feedapi['feedapi_panel']){
+				  global $user;
+
+		          $config= array( 'q' => 'panels/edit',
+		                           'panel_name' => $node->title,
+		                           'feeds' => array($node->nid => "$node->nid"),
+		                           'op' => 'Save');
+
+		          grabbit_panels_save_panel($user->uid,$config,NULL);
+
+		          drupal_set_message('A new stream panel has been created to display '.$node->title);
+
+				}
+				
+		}
+		
+	}
+}

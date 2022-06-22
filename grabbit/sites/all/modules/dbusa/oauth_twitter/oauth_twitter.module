@@ -1,0 +1,185 @@
+<?php
+
+/**
+ * Implementation of hook_menu()
+ */
+function oauth_twitter_menu()
+{
+  $items['confirm/twitter'] = array( 
+    'title' => 'Grabbit application has been added', 
+    'page callback' => 'oauth_twitter_page', 
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK
+  );
+ 
+  $items['application/twitter'] = array( 
+    'title' => 'Grabbit application', 
+    'page callback' => 'oauth_twitter_authorize', 
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK
+  );
+
+  $items['twitter/remove'] = array(  
+    'page callback' => 'oauth_twitter_remove', 
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK
+  );
+
+  $items['application/ajustes'] = array( 
+    'title' => 'Grabbit application', 
+    'page callback' => 'oauth_twitter_ajuste', 
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK
+  );
+
+  $items['user/%user_category/edit/twitterapp'] = array(
+    'title' => 'Twitter',
+    'page callback' => 'oauth_twitter_account',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+    'load arguments' => array('%map', '%index'),
+    'weight' => 10,
+    'type' => MENU_LOCAL_TASK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implementation of hook_user().
+ */
+function oauth_twitter_user($op, &$edit, &$account, $category = NULL) {
+  switch ($op) {
+    case 'categories':
+      return array(
+        array(
+          'name' => 'twitterapp',
+          'title' => 'Twitter account',
+          'weight' => 3,
+        ),
+      );
+  }
+}
+
+
+
+function oauth_twitter_ajuste(){
+	variable_set('cron_semaphore', 0);
+	watchdog("grabbit", "Cron has been liberated");
+	
+	$result = db_result(db_query("SELECT COUNT(*) FROM node"));
+	print $result;
+}
+function oauth_twitter_page(){
+	
+	include 'includes/EpiCurl.php';
+	include 'includes/EpiOAuth.php';
+	include 'includes/EpiTwitter.php';
+	include 'includes/secret.php';
+	
+	global $user;
+	
+	$twitterObj = new EpiTwitter($consumer_key, $consumer_secret);
+
+	$twitterObj->setToken($_GET['oauth_token']);
+	$token = $twitterObj->getAccessToken();
+	$config=array('token'=>$token->oauth_token,
+	              'secret'=>$token->oauth_token_secret);
+	
+    oauth_twitter_save_config($user->uid,$config);
+    $output = "You can now use Grabbit.net to manage your Twitter updates and read your twitter streams";
+	return $output;
+}
+
+function oauth_twitter_account(){
+	include 'includes/EpiCurl.php';
+	include 'includes/EpiOAuth.php';
+	include 'includes/EpiTwitter.php';
+	include 'includes/secret.php';
+	
+    $twitterObj = new EpiTwitter($consumer_key, $consumer_secret);
+
+    global $user;
+
+    $twitter_account = oauth_twitter_get_uid($user->uid);
+
+    if($twitter_account){
+	  	
+	  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.js', $type = 'module');
+	  drupal_add_css(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.css', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'oauth_twitter').'/delete-oauth.js', $type = 'module');
+		
+	  $token = unserialize($twitter_account->config);
+	  $twitterObj->setToken($token['token'], $token['secret']);
+	  $twitterInfo= $twitterObj->get_accountVerify_credentials();
+	  $twitterInfo->response;
+	
+	  $output ='<div class="twitter-message-stream clearfix even" id="twitter-post-00000" style="display: block;">
+	              <div class="listable"><span class="twitter-image">
+	                 <img width="48" src="'.$twitterInfo->profile_image_url.'"/>
+	              </div>
+		          <a class="twitter-name-link" href="#">'.$twitterInfo->screen_name.'</a>
+		          <div class="twitter-body">
+		            <div class="twitter-body-contains">You have a twitter account with grabbit</div>
+		            </div>
+		          	<div class="views-field-action-link-requestee" id="removing-tw"><a href="#">Remove twitter account from grabbit</a></div>
+				
+				</div>';
+	
+    }else{
+	  	$output ='<div class="twitter-message-stream clearfix even" id="twitter-post-00000" style="display: block;">
+		              <div class="listable"><span class="twitter-image">
+		                 
+		              </div>
+			          <div class="twitter-body">
+			            <div class="twitter-body-contains"><a href="' . $twitterObj->getAuthorizationUrl() . '">Click here to install the Grabbit.net app for Twitter</a></div>
+			          </div>
+					</div>';
+    }
+
+	return $output;
+}
+
+function oauth_twitter_remove(){
+	global $user;
+	
+	db_query("DELETE FROM {oauth_twitter} WHERE uid =%d",$user->uid);	
+	    
+		    $aquery = db_query("SELECT n.nid FROM {node} n WHERE n.type = 'twitter' AND n.uid=%d ORDER BY n.created DESC LIMIT 1000", $user->uid);
+            $count = 0;
+		    while ($n = db_fetch_object($aquery)) {
+		      //set_time_limit(5);
+		      node_delete($n->nid);
+		      $count++;
+		    }
+		    drupal_get_messages($type = NULL, $clear_queue = TRUE);
+		    print "finished";
+
+}
+
+function oauth_twitter_save_config($user,$config){
+
+  $savetodb = serialize($config);
+  if($user>0){
+	db_query("DELETE FROM {oauth_twitter} WHERE uid =%d",$user);	
+	db_query("INSERT INTO {oauth_twitter} (uid,config) VALUES (%d, '%s')",$user,$savetodb);	
+	$result = TRUE;
+
+	  return $result;	
+  }
+	
+}
+
+function oauth_twitter_get_uid($user){
+
+  $result = db_query("SELECT * FROM {oauth_twitter} WHERE uid = %d",$user);
+
+  if ($user = db_fetch_object($result)) {
+	$user = $user;
+  }
+  else{
+    $user = FALSE;	
+  }
+
+  return $user;
+}

@@ -1,0 +1,1154 @@
+<?
+//$Id$
+/**
+ * Implementation of hook_menu()
+ */
+function grabbit_gmail_menu () {
+
+  $items['gmail/ajustes/settings'] = array( 
+    'page callback' => 'grabbit_gmail_crear', 
+    'access arguments' => array('access content')
+  );
+
+  $items['gmail/open/email'] = array( 
+    'page callback' => 'grabbit_gmail_open', 
+    'access arguments' => array('access content')
+  );
+
+  $items['gmail/delete/account'] = array( 
+    'page callback' => 'grabbit_gmail_delete', 
+    'access arguments' => array('access content')
+  );
+
+  $items['gmail/get/file'] = array( 
+    'page callback' => 'grabbit_gmail_get_file', 
+    'access arguments' => array('access content')
+  );
+
+  $items['gmail/reply'] = array( 
+    'page callback' => 'grabbit_gmail_reply_message', 
+    'access arguments' => array('access content')
+  );
+
+  $items['user/%user_category/edit/add_gmail'] = array(
+   'title' => 'Gmail',
+   'description' => t('Add Your Gmail account to Grabbit'),
+   'page callback' => 'grabbit_gmail_add',
+   'access arguments' => array('access content'),
+   'page arguments' => array(1),
+   'load arguments' => array('%map', '%index'),
+   'weight' => 11,
+   'type' => MENU_LOCAL_TASK,
+  );
+
+  return $items;
+}
+
+function tinySendMail($sender,$receiver,$subject,$message
+    ,$rcvsmtp=0,$rcvport=25,$sndhost=0
+    ,$usePHPmailFunc=0,$usePHPimapFunc=0,$trySock=0,$tryAll=1,$verbose=0,$vboseloc=0){
+
+    if(!$sndhost)$sndhost=php_uname('n');
+    if(!$rcvsmtp)$rcvsmtp="mail.".substr(strstr($receiver,"@"),1);
+    if($tryAll)$usePHPmailFunc=$usePHPimapFunc=$trySock=1;
+    if($usePHPmailFunc || $usePHPimapFunc)
+    {
+        ini_set("SMTP",$rcvsmtp);
+        $addtlHdr="From: $sender";
+    }
+    $ret=0;
+    if($usePHPmailFunc)
+    {
+        infoPrint($verbose,"trying mail()",__LINE__,$vboseloc);
+        $ret=mail($receiver,$subject,$message,$addtlHdr);
+    }
+    if(!$ret && $usePHPmailFunc)
+    {
+        infoPrint($verbose,"trying imap_mail()",__LINE__,$vboseloc);
+        $ret=imap_mail($receiver,$subject,$message,$addtlHdr);
+    }
+    if($ret || !$trySock)
+    {
+        infoPrint($verbose,"ret: $ret<br>tryAll: $tryAll",__LINE__,$vboseloc);
+        infoPrint($verbose,__FILE__."::".__FUNCTION__.": Finishing: returning: $ret",__LINE__,$vboseloc);
+        return($ret);
+    }
+    infoPrint($verbose,"trying tinySockMail()",__LINE__,$vboseloc);
+    return(tinySockMail($sender,$receiver,$subject,$message
+        ,$rcvsmtp,$rcvport,$sndhost,$verbose,$vboseloc));
+}
+
+function tinySockMail($sender,$receiver,$subject,$message
+    ,$rcvsmtp=0,$rcvport=25,$sndhost=0,$verbose=0,$vboseloc=0)
+{
+    infoPrint($verbose,__FILE__."::".__FUNCTION__.": Starting",__LINE__,$vboseloc);
+    /* RFC2821 says 1000 including CRLF, so this should be compliant */
+    $textLineLimit=990;
+    $mailState_open=0;
+    $mailState_ehlo=1;
+    $mailState_rcpt=2;
+    $mailState_data=3;
+    $mailState_send=4;
+    $mailState_quit=5;
+    $mailState_return=6;
+    $curMailState=$mailState_open;
+    infoPrint($verbose,"fsockopen($rcvsmtp,$rcvport,\$errno,\$errstr)",__LINE__,$vboseloc);
+    if(!($fp=fsockopen($rcvsmtp,$rcvport,$errno,$errstr)))
+    {
+        infoPrint($verbose,"Could not open a socket to $rcvsmtp on port $rcvport",__LINE__,$vboseloc);
+        infoPrint($verbose,"Error#: $errno: $errstr",__LINE__,$vboseloc);
+        infoPrint($verbose,__FILE__."::".__FUNCTION__.": Finishing: returning: 0",__LINE__,$vboseloc);
+        return(0);
+    }
+    infoPrint($verbose,"Opened connection to $rcvsmtp:$rcvport",__LINE__,$vboseloc);
+    $returncode=1;
+    while($curMailState != $mailState_return)
+    {
+        $ret=fgets($fp);
+        $cod=substr($ret,0,3);
+        if($curMailState == $mailState_ehlo)
+        { /* drain the pipe of all EHLO informational lines */
+            if($cod == 250)
+            {
+                $ret=fgets($fp);
+                $contChar=substr($ret,3,1);
+                infoPrint($verbose,"ret: $ret",__LINE__,$vboseloc);
+                while($contChar == "-")
+                {
+                    infoPrint($verbose,"ret: $ret",__LINE__,$vboseloc);
+                    $ret=fgets($fp);
+                    $contChar=substr($ret,3,1);
+                }
+            }
+        }
+        infoPrint($verbose,"ret: $ret",__LINE__,$vboseloc);
+        infoPrint($verbose,"cod: $cod",__LINE__,$vboseloc);
+        switch($cod)
+        {
+            case 220:
+                switch($curMailState)
+                {
+                    case $mailState_open:
+                        $snd="EHLO $sndhost\r\n";
+                        $curMailState=$mailState_ehlo;
+                        break;
+                    default:
+                        $snd="QUIT\r\n";
+                        $returncode=0;
+                        $curMailState=$mailState_return;
+                }
+                break;
+            case 250:
+                switch($curMailState)
+                {
+                    case $mailState_ehlo:
+                        $snd="MAIL FROM:<$sender>\r\n";
+                        $curMailState=$mailState_rcpt;
+                        break;
+                    case $mailState_rcpt:
+                        $snd="RCPT TO:<$receiver>\r\n";
+                        $curMailState=$mailState_data;
+                        break;
+                    case $mailState_data:
+                        $snd="DATA\r\n";
+                        $curMailState=$mailState_send;
+                        break;
+                    case $mailState_quit:
+                        $snd="QUIT\r\n";
+                        $curMailState=$mailState_return;
+                        break;
+                    default:
+                        $snd="QUIT\r\n";
+                        $returncode=0;
+                        $curMailState=$mailState_return;
+                }
+                break;
+            case 354:
+                switch($curMailState)
+                {
+                    case $mailState_send;
+                        $snd="From: $sender\n";
+                        $snd.="To: $receiver\n";
+                        $snd.="Subject: $subject\n";
+                        $snd.="Date: ".date('r')."\n";
+                        $snd.="Message-ID: <".
+                            date('YmdHis').":".
+                            php_uname('n').":".
+                            getmypid().
+                            ":$sender>\n\n";
+                        $snd.=wordwrap($message,$textLineLimit,"\n",1);
+                        $sndArray=explode("\n",$snd);
+                        $numLines=count($sndArray);
+                        infoPrint($verbose,"Sending header and message lines",__LINE__,$vboseloc);
+                        for($i=0; $i < $numLines; $i++)
+                        {
+                            if($verbose)print((($i+1)%10)." ");
+                            fputs($fp,$sndArray[$i]."\r\n");
+                        }
+                        if($verbose)print("\r\n<br>");
+                        infoPrint($verbose,"Done",__LINE__,$vboseloc);
+                        $snd="\r\n.\r\n";
+                        $curMailState=$mailState_quit;
+                        break;
+                    default:
+                        $snd="QUIT\r\n";
+                        $returncode=0;
+                        $curMailState=$mailState_return;
+                }
+                break;
+            default:
+                $snd="QUIT\r\n";
+                $returncode=0;
+                $curMailState=$mailState_return;
+        }
+        infoPrint($verbose,"snd: $snd",__LINE__,$vboseloc);
+        fputs($fp,$snd);
+    }
+    $ret=fgets($fp);
+    infoPrint($verbose,"ret: $ret",__LINE__,$vboseloc);
+    fclose($fp);
+    infoPrint($verbose,__FILE__."::".__FUNCTION__.": Finishing: returning: $returncode",__LINE__,$vboseloc);
+    return($returncode);
+}
+
+
+/* Print informational messages if the $verbose argument is non-zero
+*/
+function infoPrint($verbose,$msg,$loc,$showloc)
+{
+    if($verbose)
+    {
+        if($showloc)$locStr=$loc.": "; else $locStr="";
+        print($locStr.htmlentities(addslashes($msg))."\r\n<br>");
+    }
+}
+
+function grabbit_gmail_reply_message(){
+	global $user;
+	$nid = arg(2);
+	$message = node_load($nid);
+	$reply_to = $message->field_from_add[0]['value'];
+	$gmail = grabbit_gmail_get($user->uid);
+  print '<style>
+         #grabbit-gmail-mail-form .reply-head
+		{
+			background-color: #E6EAED;
+			padding: 10px 15px;
+		}
+		#grabbit-gmail-mail-form .reply-body
+		{
+			padding: 10px 15px;
+		}
+		#grabbit-gmail-mail-form #edit-subject
+		{
+			width: 620px;
+		}
+		#grabbit-gmail-mail-form .to-mail
+    {
+    	color: #999999;
+    	display: inline;
+    }
+    .frost-div div
+    {
+      display: inline;
+    }
+		#grabbit-gmail-mail-form #edit-body
+		{
+			width: 620px;
+			height: 250px;
+		}
+		#grabbit-gmail-mail-form .form-submit
+		{
+			background: url('.base_path().path_to_theme().'/images/send_inside.gif) no-repeat;
+			width: 47px;
+			height: 19px;
+			border: none;
+			margin-right: 58px;
+			float: right;
+			margin-top: 10px;
+		}
+		#grabbit-gmail-mail-form #edit-subject-wrapper label
+		{
+		  display:block;
+      float:left;
+      width:60px;
+		}
+		#grabbit-gmail-mail-form #edit-body-wrapper
+		{
+			margin-left: 60px;
+			margin-top: 10px;
+		}
+		#grabbit-gmail-mail-form .form-item
+		{
+			margin: 0;
+		}
+		#grabbit-gmail-mail-form .form-item label
+		{
+			display: inline;
+			font-weight:bold;
+		}
+		.gmail-body{
+			font-size:12px;
+			font-size-adjust:none;
+			font-style:normal;
+			font-variant:normal;
+			font-weight:normal;
+			line-height:normal;
+		}
+		body{
+		  font-family: Helvetica, Arial, sans-serif;
+			margin:0;
+			padding:0;
+		}
+</style>
+<script type="text/javascript" src="/grabbit/sites/all/modules/jquery_update/replace/jquery.js?n"></script>
+<div class="gmail-body">';
+
+  echo drupal_get_form( 'grabbit_gmail_mail_form', $gmail['user'], $reply_to, $message->title,$message->field_from[0]['value'] );
+
+  print "</div>";
+}
+
+function grabbit_gmail_mail_form( &$form_state, $from, $to, $title, $to_title)
+{
+  $form['to'] = array(
+    '#type'           => 'item',
+    '#prefix'         => '<div class="reply-head"><div class="frost-div">',
+    '#value'          => $to,
+    '#title'          => t('To'),
+    '#suffix'         => '<span class="to-mail">('.$to_title.')</span></div>'
+  );
+  $form['from'] = array(
+    '#type'           => 'item',
+    '#suffix'         => '</div>',
+    '#value'          => $from,
+    '#title'          => t('From')
+  );
+  $form['subject'] = array(
+    '#type'           => 'textfield',
+    '#prefix'         => '<div class="reply-body">',
+    '#value'          => 'Re: '.$title,
+    '#title'          => t('Subject')
+  );
+  $form['body'] = array(
+    '#type'           => 'textarea'
+  );
+  $form['submit'] = array(
+    '#type'           => 'submit',
+    '#suffix'         => '</div>',
+    '#value'          => ''
+  );
+  $form['#submit'][] = 'grabbit_gmail_mail_form_submit';
+  
+  return $form;
+}
+
+function grabbit_gmail_mail_form_submit( $form )
+{
+  global $user;
+  
+  $args = $form['#post'];
+  $args['to']=$form['to']['#value'];
+  $gmail = grabbit_gmail_get($user->uid);
+  
+  $ret = tinySendMail(
+    $gmail['user'],
+    $args['to'],
+    $args['subject'],
+    $args['body'],
+    "imap.googlemail.com",
+    993,
+    "google.com"
+  );
+  if(!$ret)
+  {
+    print("Oh, pshaw!  It didn't work!<br>");
+  }
+  else
+  {
+    echo '<script>self.parent.tb_remove();</script>Your message has been sent.';
+    exit;
+  }
+}
+
+/**
+ * Implementation of hook_user().
+ */
+function grabbit_gmail_user($op, &$edit, &$account, $category = NULL) {
+  switch ($op) {
+    case 'categories':
+      return array(
+        array(
+          'name' => 'add_gmail',
+          'title' => 'Gmail account',
+          'weight' => 3,
+        ),
+      );
+  }
+}
+
+
+
+function grabbit_gmail_open(){
+	global $user;
+
+	$node = node_load(arg(3));
+	
+	if ($node->uid == $user->uid){
+		print theme_gmail_mail($node);
+	}
+	
+}
+
+function theme_gmail_mail($node){
+	
+	$attach=unserialize($node->field_gmail_attachment[0]['value']);
+	if(is_array($attach)){
+		$num=2;
+		$attachments='<strong>Attachments: </strong>';
+		foreach ($attach as $key=>$value){
+			$attachments .='<a href="'.base_path().'gmail/get/file/'.$node->field_msgno[0]['value'].'/'.$value.'/gmail/'.$num.'">'.$value.'</a> ';
+			$num++;
+		}
+	}
+	
+	$output = '
+	<script>
+	
+	function cerrar_ventana(){
+		$("#TB_ajaxContent").hide();
+		$("#TB_title").hide();
+	}
+	
+	</script>
+	<div class="gmail-body">
+	<div class="gmail-wrap">
+	 <div class="gmail-wrap-of-the-wrap">
+	  <span class="gmail-header"><strong>From: </strong></span><span class="gmail-header-contains">'.$node->field_from_add[0]['value'].' <span class="to-mail">('.$node->field_from[0]['value'].')</span></span><br>
+	  <span class="gmail-header"><strong>Date: </strong></span><span class="gmail-header-contains">'.format_date($node->created).'</span><br>
+	  <span class="gmail-header"><strong>Subject: </strong></span><span class="gmail-header-contains">'.$node->title.'</span><br>
+	  <div class="reply">'.l('Reply This','gmail/reply/'.$node->nid,array('attributes'=>array('class'=>'thickbox reply_mail','onclick'=>'JavaScript:cerrar_ventana();'),'query'=>'KeepThis=true&TB_iframe=true&height=500&width=740')).'</div>
+	 </div>
+	 <div class="gmail-atachments">
+	  '.$attachments.'
+	 </div>
+	</div>
+	<div class="body-wrap">
+	 <div class="gmail-email">
+	  '.$node->body.'
+	 </div>
+	</div>
+	<div class="bottom-fond">&nbsp;</div>
+	</div>';
+	
+	return $output;
+	
+}
+
+function grabbit_gmail_add(){
+	global $user;
+	
+	$account = grabbit_gmail_get($user->uid);
+	
+	if($account){
+		
+	  $output ='<div class="node-stream-gmail node-stream-news clearfix stream-item-element even" style="display:block">
+			             <div class="meta">
+							<span class="image-deal"><img width="48" height="48" src="'.base_path().'sites/all/themes/grabbit/images/various/gmail.jpg" /></span>
+							<div class="item-body">
+							  <h2><a href="#">'.$account['user']." - ".l('Delete','gmail/delete/account').'</a></h2>
+							  <div class="content-body">
+							     You have a Gmail account in Grabbit.
+							     If you want to add a new account you must first delete this one.
+							  </div>
+							</div>
+						 </div>
+					</div>';
+						
+	}else{
+	  $output = drupal_get_form('grabbit_gmail_add_form');	
+	}
+	
+	return $output;
+}
+
+function grabbit_gmail_delete(){
+	global $user;
+	db_query("DELETE FROM {grabbit_gmail} WHERE uid=%d",$user->uid);
+	
+	drupal_goto('user/'.$user->uid.'/add_gmail');
+}
+
+function grabbit_gmail_add_form($form_state){
+
+		$form['counter'] = array(
+		    '#type' => 'item',
+		    '#prefix'=>'<div id="description">',
+		    '#value' => 'Add a Gmail account to your grabbit stream',
+		    '#suffix'=>'</div>'
+			 );	 
+		$form['user'] = array(
+		    '#type' => 'textfield',
+		    '#title' => t('GMail Address'),
+		    '#default_value' => $gmail_sess['gmail_name'],
+		    '#required' => TRUE,
+		    '#size' => 20,
+		  );
+		  $form['pass'] = array(
+		    '#type' => 'password',
+		    '#title' => t('Password'),
+		    '#required' => TRUE,
+		    '#size' => 20,
+		  );
+		  $form['submit'] = array(
+		    '#type' => 'submit',
+		    '#value' => t('Save'),
+		  ); 
+		
+		return $form;
+}
+
+
+/**
+ * gmail_connect_get_login_validate - validate the login form
+ */
+function grabbit_gmail_add_form_validate($form, &$form_state) {
+  if (!valid_email_address($form_state['values']['user']) || stripos($form_state['values']['user'], '@gmail') === FALSE) {
+    form_set_error('user', t('The e-mail address %mail is not valid.', array('%mail' => $form_state['values']['user'])));
+  }else{
+	$mbox = @imap_open(
+	       "{imap.googlemail.com:993/imap/ssl}INBOX",
+	      $form_state['values']['user'],
+	      $form_state['values']['pass'],
+	      OP_READONLY
+	    );	
+	if(!$mbox)
+	  form_set_error('user', t('Your account did not validate, check your user name and password.', array('%mail' => $form_state['values']['user'])));
+  }
+}
+
+/**
+ * Save the data
+ */
+function grabbit_gmail_add_form_submit($form, &$form_state) {
+  global $user;
+  $settings=array();
+  $settings['user']=$form_state['values']['user'];
+  $settings['password']=$form_state['values']['pass'];
+  grabbit_gmail_save($user->uid,$settings);
+
+}
+
+function grabbit_gmail_save($user,$settings){
+	$check = db_query("SELECT * FROM {grabbit_gmail} WHERE uid=%d",$user);
+	
+	if(db_affected_rows($check)){
+	  if($settings['lastime']){
+		  db_query("UPDATE {grabbit_gmail} SET lastime='%s' WHERE uid=%d",$settings['lastime'],$user);	
+	  }else{
+		  db_query("UPDATE {grabbit_gmail} SET user='%s', password='%s', WHERE uid=%d",$settings['user'],$settings['password'],$user);	
+	  }
+	}else{
+	  db_query("INSERT INTO {grabbit_gmail} SET uid=%d, user='%s', password='%s', lastime='%s'",$user,$settings['user'],$settings['password'],$settings['lastime']);		
+	}
+}
+
+function grabbit_gmail_get($user){
+	
+	$check = db_query("SELECT * FROM {grabbit_gmail} WHERE uid=%d",$user);
+	
+	if(db_affected_rows($check)){
+	  $return = array();
+	  $object=db_fetch_object($check);
+	  $return['user']=$object->user;
+	  $return['password']=$object->password;
+	  $return['lastime']=$object->lastime;
+	  return $return;
+	}
+	return NULL;
+}
+
+class ProgressBar {
+
+	/**
+	 * Constructor
+	 *
+	 * @param str $message Message shown above the bar eg. "Please wait...". Default: ''
+	 * @param bool $hide Hide the bar after completion (with JavaScript).
+	 * Default: false
+	 * @param int $sleepOnFinish Seconds to sleep after bar completion. Default: 0
+	 * @param int $barLength Length in pixels. Default: 200
+	 * @param int $precision Desired number of steps to show. Default: 20. Precision will become $numElements when greater than $numElements. $barLength will increase if $precision is greater than $barLength.
+	 * @param str $backgroundColor Color of the bar background
+	 * @param str $foregroundColor Color of the actual progress-bar
+	 * @param str $domID Html-Attribute "id" for the bar
+	 * @param str $stepElement Element the bar is build from
+	 */
+    function ProgressBar($message='', $hide=false, $sleepOnFinish=0, $barLength=200, $precision=20,
+    					 $backgroundColor='#cccccc', $foregroundColor='blue', $domID='progressbar',
+    					 $stepElement='<div style="width:%spx;height:20px;float:left;"></div>'
+    					 ){
+
+    	//increase time limit
+		if(!ini_get('safe_mode')){
+			set_time_limit(0);
+		}
+
+    	$this->hide = (bool) $hide;
+    	$this->sleepOnFinish = (int) $sleepOnFinish;
+    	$this->domID = strip_tags($domID);
+    	$this->message = $message;
+    	$this->stepElement = $stepElement;
+    	$this->barLength = (int) $barLength;
+    	$this->precision = (int) $precision;
+    	$this->backgroundColor = strip_tags($backgroundColor);
+		$this->foregroundColor = strip_tags($foregroundColor);
+    	if($this->barLength < $this->precision){
+    		$this->barLength = $this->precision;
+    	}
+
+    	$this->StepCount = 0;
+    	$this->CallCount = 0;
+    }
+
+	/**
+	 * Print the empty progress bar
+	 * @param int $numElements Number of Elements to be processed and number of times $bar->initialize() will be called while processing
+	 */
+	function initialize($numElements)
+	{
+		$numElements = (int) $numElements ;
+    	if($numElements == 0){
+    		$numElements = 1;
+    	}
+		//calculate the number of calls for one step
+    	$this->CallsPerStep = ceil(($numElements/$this->precision)); // eg. 1000/200 = 100
+
+		//calculate the total number of steps
+		if($numElements >= $this->CallsPerStep){
+			$this->numSteps = round($numElements/$this->CallsPerStep);
+		}else{
+			$this->numSteps = round($numElements);
+		}
+
+    	//calculate the length of one step
+    	$stepLength = floor($this->barLength/$this->numSteps);  // eg. 100/10 = 10
+
+    	//the rest is the first step
+    	$this->rest = $this->barLength-($stepLength*$this->numSteps);
+    	if($this->rest > 0){
+			$this->firstStep = sprintf($this->stepElement,$this->rest);
+    	}
+
+		//build the basic step-element
+		$this->oneStep = sprintf($this->stepElement,$stepLength);
+
+		//build bar background
+		$backgroundLength = $this->rest+($stepLength*$this->numSteps);
+		$this->backgroundBar = sprintf($this->stepElement,$backgroundLength);
+
+		//stop buffering
+    	ob_end_flush();
+    	//start buffering
+    	ob_start();
+
+		echo '<div id="'.$this->domID.'">'.
+			 $this->message.'<br/>'.
+			 '<div style="position:absolute;color:'.$this->backgroundColor.';background-color:'.$this->backgroundColor.'">'.$this->backgroundBar.'</div>' .
+			 '<div style="position:absolute;color:'.$this->foregroundColor.';background-color:'.$this->foregroundColor.'">';
+
+		ob_flush();
+		flush();
+	}
+
+	/**
+	 * Count steps and increase bar length
+	 *
+	 */
+	function increase()
+	{
+		$this->CallCount++;
+
+		if(!$this->started){
+			//rest output
+			echo $this->firstStep;
+			ob_flush();
+			flush();
+		}
+
+		if($this->StepCount < $this->numSteps
+		&&(!$this->started || $this->CallCount == $this->CallsPerStep)){
+
+			//add a step
+			echo $this->oneStep;
+			ob_flush();
+			flush();
+
+			$this->StepCount++;
+			$this->CallCount=0;
+		}
+		$this->started = true;
+
+		if(!$this->finished && $this->StepCount == $this->numSteps){
+
+			// close the bar
+			echo '</div></div><br/>';
+			ob_flush();
+			flush();
+
+			//sleep x seconds before ending the script
+			if($this->sleepOnFinish > 0){
+				sleep($this->sleepOnFinish);
+			}
+
+			//hide the bar
+			if($this->hide){
+				echo '<script type="text/javascript">document.getElementById("'.$this->domID.'").style.display = "none";</script>';
+				ob_flush();
+				flush();
+			}
+			$this->finished = true;
+		}
+	}
+}
+
+// Main ReciveMail Class File - Version 1.1 (02-06-2009)
+/*
+ * File: recivemail.class.php
+ * Description: Reciving mail With Attechment
+ * Version: 1.1
+ * Created: 01-03-2006
+ * Modified: 02-06-2009
+ * Author: Mitul Koradia
+ * Email: mitulkoradia@gmail.com
+ * Cell : +91 9825273322
+ */
+ 
+/***************** Changes *********************
+*
+* 1) Added feature to retrive embedded attachment - Changes provided by. Antti <anttiantti83@gmail.com>
+* 2) Added SSL Supported mailbox.
+*
+**************************************************/
+
+class receiveMail
+{
+        var $server='';
+        var $username='';
+        var $password='';
+       
+        var $marubox='';                                       
+       
+        var $email='';                 
+       
+        function receiveMail($username,$password,$EmailAddress,$mailserver='pop.gmail.com',$servertype='pop3',$port='995',$ssl = true) //Constructure
+        {
+                if($servertype=='imap')
+                {
+                        if($port=='') $port='143';
+                        $strConnect='{'.$mailserver.':'.$port. '/imap'.($ssl ? "/ssl" : "").'}INBOX';
+
+                }
+                else if($servertype=='gmail')
+                {
+                        
+                        $strConnect='{imap.googlemail.com:993/imap/ssl}INBOX';
+                }
+                else
+                {
+                        $strConnect='{'.$mailserver.':'.$port. '/pop3'.($ssl ? "/ssl" : "").'}INBOX';
+                }
+                $this->server                   =       $strConnect;
+                $this->username                 =       $username;
+                $this->password                 =       $password;
+                $this->email                    =       $EmailAddress;
+        }
+        function connect() //Connect To the Mail Box
+        {
+	
+							imap_timeout(IMAP_OPENTIMEOUT);
+							imap_timeout(IMAP_READTIMEOUT);
+							imap_timeout(IMAP_WRITETIMEOUT);
+							imap_timeout(IMAP_CLOSETIMEOUT);
+                $this->marubox=@imap_open(
+	              $this->server,
+	              $this->username,
+	              $this->password,
+			      OP_READONLY
+			    );
+               
+                if(!$this->marubox)
+                {
+                        return FALSE;                     
+                        
+                }else{
+	                return TRUE;
+                }
+        }
+        function getHeaders($mid) // Get Header info
+        {
+                if(!$this->marubox)
+                        return false;
+
+                $mail_header=imap_header($this->marubox,$mid);
+                $sender=$mail_header->from[0];
+                $sender_replyto=$mail_header->reply_to[0];
+                if(strtolower($sender->mailbox)!='mailer-daemon' && strtolower($sender->mailbox)!='postmaster')
+                {
+                        $mail_details=array(
+                                        'from'=>strtolower($sender->mailbox).'@'.$sender->host,
+                                        'fromName'=>$sender->personal,
+                                        'toOth'=>strtolower($sender_replyto->mailbox).'@'.$sender_replyto->host,
+                                        'toNameOth'=>$sender_replyto->personal,
+                                        'subject'=>$mail_header->subject,
+                                        'to'=>strtolower($mail_header->toaddress),
+                                        'date'=>$mail_header->date
+                                );
+                }
+
+                return $mail_details;
+        }
+        function get_mime_type(&$structure) //Get Mime type Internal Private Use
+        {
+                $primary_mime_type = array("TEXT", "MULTIPART", "MESSAGE", "APPLICATION", "AUDIO", "IMAGE", "VIDEO", "OTHER");
+               
+                if($structure->subtype) {
+                        return $primary_mime_type[(int) $structure->type] . '/' . $structure->subtype;
+                }
+                return "TEXT/PLAIN";
+        }
+        function get_part($stream, $msg_number, $mime_type, $structure = false, $part_number = false) //Get Part Of Message Internal Private Use
+        {
+                if(!$structure) {
+                        $structure = imap_fetchstructure($stream, $msg_number);
+                }
+                if($structure) {
+                        if($mime_type == $this->get_mime_type($structure))
+                        {
+                                if(!$part_number)
+                                {
+                                        $part_number = "1";
+                                }
+                                $text = imap_fetchbody($stream, $msg_number, $part_number);
+                                if($structure->encoding == 3)
+                                {
+                                        return imap_base64($text);
+                                }
+                                else if($structure->encoding == 4)
+                                {
+                                        return imap_qprint($text);
+                                }
+                                else
+                                {
+                                        return $text;
+                                }
+                        }
+                        if($structure->type == 1) /* multipart */
+                        {
+                                while(list($index, $sub_structure) = each($structure->parts))
+                                {
+                                        if($part_number)
+                                        {
+                                                $prefix = $part_number . '.';
+                                        }
+                                        $data = $this->get_part($stream, $msg_number, $mime_type, $sub_structure, $prefix . ($index + 1));
+                                        if($data)
+                                        {
+                                                return $data;
+                                        }
+                                }
+                        }
+                }
+                return false;
+        }
+        function getTotalMails($time) //Get Total Number off Unread Email In Mailbox
+        {
+                if(!$this->marubox)
+                        return false;
+
+                //$headers=imap_headers($this->marubox);
+                $headers = imap_search($this->marubox, 'SINCE "'.$time.'"');
+                return $headers;
+        }
+        function GetAttach($mid,$path) // Get Atteced File from Mail
+        {
+                if(!$this->marubox)
+                        return false;
+
+                $struckture = imap_fetchstructure($this->marubox,$mid);
+                $ar="";
+                if($struckture->parts)
+        {
+                        foreach($struckture->parts as $key => $value)
+                        {
+                                $enc=$struckture->parts[$key]->encoding;
+                                if($struckture->parts[$key]->ifdparameters)
+                                {
+                                        $name=$struckture->parts[$key]->dparameters[0]->value;
+                                        $message = imap_fetchbody($this->marubox,$mid,$key+1);
+                                        if ($enc == 0)
+                                                $message = imap_8bit($message);
+                                        if ($enc == 1)
+                                                $message = imap_8bit ($message);
+                                        if ($enc == 2)
+                                                $message = imap_binary ($message);
+                                        if ($enc == 3)
+                                                $message = imap_base64 ($message);
+                                        if ($enc == 4)
+                                                $message = quoted_printable_decode($message);
+                                        if ($enc == 5)
+                                                $message = $message;
+                                        //$fp=fopen($path.$name,"w");
+                                        //fwrite($fp,$message);
+                                        //fclose($fp);
+                                        $ar=$ar.$name.",";
+                                }
+                                // Support for embedded attachments starts here
+                                if($struckture->parts[$key]->parts)
+                                {
+                                        foreach($struckture->parts[$key]->parts as $keyb => $valueb)
+                                        {
+                                                $enc=$struckture->parts[$key]->parts[$keyb]->encoding;
+                                                if($struckture->parts[$key]->parts[$keyb]->ifdparameters)
+                                                {
+                                                        $name=$struckture->parts[$key]->parts[$keyb]->dparameters[0]->value;
+                                                        $partnro = ($key+1).".".($keyb+1);
+                                                        $message = imap_fetchbody($this->marubox,$mid,$partnro);
+                                                        if ($enc == 0)
+                                                                   $message = imap_8bit($message);
+                                                        if ($enc == 1)
+                                                                   $message = imap_8bit ($message);
+                                                        if ($enc == 2)
+                                                                   $message = imap_binary ($message);
+                                                        if ($enc == 3)
+                                                                   $message = imap_base64 ($message);
+                                                        if ($enc == 4)
+                                                                   $message = quoted_printable_decode($message);
+                                                        if ($enc == 5)
+                                                                   $message = $message;
+                                                        //$fp=fopen($path.$name,"w");
+                                                        //fwrite($fp,$message);
+                                                        //fclose($fp);
+                                                        $ar=$ar.$name.",";
+                                                }
+                                        }
+                                }                              
+                        }
+                }
+                $ar=substr($ar,0,(strlen($ar)-1));
+                return $ar;
+        }
+        function getBody($mid) // Get Message Body
+        {
+                if(!$this->marubox)
+                        return false;
+
+                $body = $this->get_part($this->marubox, $mid, "TEXT/HTML");
+                if ($body == "")
+                        $body = $this->get_part($this->marubox, $mid, "TEXT/PLAIN");
+                if ($body == "") {
+                        return "";
+                }
+
+                return $body;
+        }
+        function deleteMails($mid) // Delete That Mail
+        {
+                if(!$this->marubox)
+                        return false;
+       
+                imap_delete($this->marubox,$mid);
+        }
+        function close_mailbox() //Close Mail Box
+        {
+                if(!$this->marubox)
+                        return false;
+
+                imap_close($this->marubox,CL_EXPUNGE);
+        }
+}
+
+function grabbit_gmail_crear($user=1){
+	
+	
+	$yesterday = date('D, j M Y');
+	set_time_limit(0);
+    date_default_timezone_set("America/Monterrey");
+
+	if($_GET['user'])
+	  $user=$_GET['user'];
+    $gmail = grabbit_gmail_get($user);
+
+
+    if($gmail['lastime']){
+	  $time=$gmail['lastime'];
+    }else{
+	  $time=$yesterday;
+    }
+
+
+	$obj= new receiveMail($gmail['user'],$gmail['password'],$gmail['user'],'imap.googlemail.com','gmail');
+	$obj->connect(); 
+
+	$tot=$obj->getTotalMails($time);
+	if(is_array($tot)):
+		
+	foreach($tot as $i)
+	{
+		
+	    $head=$obj->getHeaders($i);  // Get Header Info Return Array Of Headers **Array Keys are (subject,to,toOth,toNameOth,from,fromName)
+	
+	    if(strtotime($head['date'])>strtotime($time)){
+	
+			$boby = $obj->getBody($i);  // Get Body Of Mail number Return String Get Mail id in interger
+
+		    $body=quoted_printable_decode(utf8_encode($boby));
+
+		    $str=$obj->GetAttach($i,"./"); // Get attached File from Mail Return name of file in comma separated string  args. (mailid, Path to store file)
+		    $ar=explode(",",$str);
+
+			$node = new stdClass();
+
+	        $title = $head['subject'];
+			$title=str_replace("=?ISO-8859-1?Q?","",$title);
+		    $title=str_replace("?=","",$title);
+
+		    $title=utf8_encode(imap_qprint($title));
+
+			$node->title = str_replace('_',' ',$title);
+			$node->created = strtotime($head['date']);
+			$node->type = 'gmail';
+			$node->status = 0;
+			$node->uid = $user;
+			$node->body = $body;
+
+			$string = $head['fromName'];
+			$string=str_replace("=?ISO-8859-1?Q?","",$string);
+		    $string=str_replace("?=","",$string);
+
+		    $string=utf8_encode(imap_qprint($string));
+
+			$node->field_from[0]['value'] = $string;
+
+			$node->field_from_add[0]['value'] = $head['from'];
+
+			$node->field_msgno[0]['value'] = $i;
+
+			$node->field_gmail_attachment[0]['value']=serialize($ar);
+
+			$edit->validated = TRUE;
+
+			node_save($node);
+
+			$string='';
+			$title='';
+			$from='';
+
+ 	    }
+	    
+	}
+	endif;
+	$obj->close_mailbox();   //Close Mail Box
+	$settings=array('lastime'=>date('D, j M Y G:i:s'));
+	
+	grabbit_gmail_save($user,$settings);
+    
+}
+
+function grabbit_gmail_get_file(){
+	
+	if(arg(3) && arg(4) && arg(5) && arg(6)){
+	  $return = download_file(arg(3),arg(4),arg(5),arg(6));	
+	}else{
+		$return = "All arguments are needed to download the file";
+	}
+	
+	
+	print $return;
+}
+
+function download_file($msgno,$file,$account,$number){
+	global $user;
+	
+	if($account=='gmail'){
+		$gmail = grabbit_gmail_get($user->uid);
+	  	$obj= new receiveMail($gmail['user'],$gmail['password'],$gmail['user'],'imap.googlemail.com','gmail');
+		$obj->connect();	
+	}
+	
+	
+	   	$strFileName = $file;
+	   	$strFileType = strrev(substr(strrev($strFileName),0,4));
+	   	$fileContent = imap_fetchbody($obj->marubox,$msgno,$number);
+	
+	   	$ContentType = "application/octet-stream";
+        switch($strFileType){
+	      case ".asf":
+	        $ContentType = "video/x-ms-asf";
+	      break;
+	      case ".avi":
+	        $ContentType = "video/avi";
+	      break;
+	      case ".doc":
+	        $ContentType = "application/msword";
+	      break;
+	      case ".zip":
+	        $ContentType = "application/zip";
+	      break;
+	      case ".xls":
+	        $ContentType = "application/vnd.ms-excel";
+	      break;
+	      case ".gif":
+	        $ContentType = "image/gif";
+	      break;
+	      case ".jpg":
+	      case "jpeg":
+	        $ContentType = "image/jpeg";
+	      break;
+	      case ".wav":
+	        $ContentType = "audio/wav";
+	      break;
+	      case ".mp3":
+	   		$ContentType = "audio/mpeg3";
+	      break;
+	      case ".mpg":
+	      case "mpeg":
+	        $ContentType = "video/mpeg";
+	      break;
+	      case ".rtf":
+	        $ContentType = "application/rtf";
+	      break;
+	      case ".htm":
+	      case "html":
+	        $ContentType = "text/html";
+	      break;
+	      case ".xml":
+	   		$ContentType = "text/xml";
+	      break;
+	      case ".xsl":
+	        $ContentType = "text/xsl";
+	      break;
+	      case ".css":
+	     	$ContentType = "text/css";
+	      break;
+	      case ".php":
+	        $ContentType = "text/php";
+	      break;
+	      case ".pdf":
+	        $ContentType = "application/pdf";
+	      break;
+        }
+
+		header ("Content-Type: $ContentType"); 
+		header("Content-Disposition: attachment; filename=\"" . $strFileName . "\"; size=$fileSize;");
+		// Updated oktober 29. 2005
+		if (substr($ContentType,0,4) == "text") {
+		  echo imap_qprint($fileContent);
+		} else {
+		  echo imap_base64($fileContent);
+		}
+		
+		$obj->close_mailbox();
+
+}
+

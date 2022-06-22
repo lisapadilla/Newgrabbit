@@ -1,0 +1,180 @@
+<?
+
+/**
+ * Implementation of hook_menu()
+ */
+function grabbit_albums_menu() {
+
+  $items['albums/calculate'] = array( 
+    'page callback' => 'grabbit_albums_calculate', 
+    'access arguments' => array('access content')
+  );
+
+  $items['album'] = array( 
+    'page callback' => 'grabbit_albums_display', 
+    'title' => 'album',
+    'access arguments' => array('access content')
+  );
+
+  return $items;
+}
+
+function grabbit_albums_preprocess_node(&$variables){
+	
+	if($variables['type']=='media'){
+		$controls = grabbit_aldums_calculate_next($variables['field_media_type'][0]['value'],$variables['uid'],$variables);
+		$variables['body']=$controls.$variables['body'];
+	}
+}
+
+function grabbit_aldums_calculate_next($type,$user,$var){
+	
+	switch($type){
+		case "mov":
+		case "mp3":
+		case "flv":
+		// media
+		  $types = array("'mov'","'mp3'","'flv'");  
+		  $album='media';
+		break;
+		case "doc":
+		case "rtf":
+		case "txt":
+		case "csv":
+		case "ppt":
+		case "xls":
+		case "pdf":
+		// documents
+		  $types = array("'doc'","'rtf'","'txt'","'csv'","'ppt'","'xls'","'pdf'");  
+		  $album='documents';
+		break;
+		default:
+		// photos
+		  $types = array("'jpeg'", "'bmp'", "'jpg'", "'png'", "'gif'");
+		  $album='images';
+		break;
+	}
+	$nid=$var['nid'];
+	$unserialize=unserialize($var['field_media'][0]['value']);
+	if($unserialize){
+		$nid=$unserialize['file'];
+	}
+	
+	$sql_more="SELECT node.nid AS nid
+	 FROM node node 
+	 LEFT JOIN content_type_media node_data_field_media_type ON node.vid = node_data_field_media_type.vid
+	 INNER JOIN users users ON node.uid = users.uid
+	 WHERE (node.type in ('%s')) AND ((node_data_field_media_type.field_media_type_value) in (".implode($types,',').")) AND (users.uid in (%d)) AND (node.nid > %d) ORDER BY node.nid ASC LIMIT 1";
+	
+	$sql_less="SELECT node.nid AS nid
+	 FROM node node 
+	 LEFT JOIN content_type_media node_data_field_media_type ON node.vid = node_data_field_media_type.vid
+	 INNER JOIN users users ON node.uid = users.uid
+	 WHERE (node.type in ('%s')) AND ((node_data_field_media_type.field_media_type_value) in (".implode($types,',').")) AND (users.uid in (%d)) AND (node.nid < %d) ORDER BY node.nid DESC LIMIT 1";
+	
+	$more = db_result(db_query($sql_more,'media',$user,$nid));
+	
+	$less = db_result(db_query($sql_less,'media',$user,$nid));
+	
+	$controls = '<div class="album-control">';
+	if($less)
+	  $controls .=l('Previous','node/'.$less,array('attributes'=>array('class'=>'album-prev')));
+	
+	if($more)
+	  $controls .=l('Next','node/'.$more,array('attributes'=>array('class'=>'album-next')));
+	
+	$controls .=l('album','album/'.$user.'/'.$album,array('attributes'=>array('class'=>'album-icon')));
+	$controls .= '</div>';
+	
+	return $controls;
+}
+
+function grabbit_albums_display(){
+	$user_this=user_load(arg(1));
+	$varstoadd = array('grabbit_1' => arg(2),'grabbit_2' => $user_this->name);
+	drupal_add_js($varstoadd, 'setting');
+	drupal_add_js(drupal_get_path('module', 'grabbit_albums').'/jquery.tools.min.js', $type = 'module');
+	drupal_add_js(drupal_get_path('module', 'grabbit_albums').'/albums_engine.js', $type = 'module');
+	
+	$uid=arg(1);
+	$type=arg(2);
+	$number_of_items=9;
+	
+	switch($type){
+		case 'media':
+		  $types = array("'mov'","'mp3'","'flv'");  
+		break;
+		case 'documents':
+		  $types = array("'doc'","'rtf'","'txt'","'csv'","'ppt'","'xls'","'pdf'");  
+		break;
+		default:
+		  $types = array("'jpeg'", "'bmp'", "'jpg'", "'png'", "'gif'");
+		break;
+	}
+	
+	$sql_less="SELECT node.nid AS nid
+	 FROM node node 
+	 LEFT JOIN content_type_media node_data_field_media_type ON node.vid = node_data_field_media_type.vid
+	 INNER JOIN users users ON node.uid = users.uid
+	 WHERE (node.type in ('%s')) AND ((node_data_field_media_type.field_media_type_value) in (".implode($types,',').")) AND (users.uid in (%d)) ORDER BY node.nid DESC";
+	$nodes = db_query($sql_less,'media',$uid);
+	
+	$output = '
+	<div class="album-background clearfix">
+	<div class="album-main-controllers album-control">
+	             <select name="album-type" id="album-type">
+				        <option value="images">Images</option>
+				        <option value="documents">Documents</option>
+				        <option value="media">Videos</option>
+				 </select>
+				 <a href="JavaScript:void(0);" class="album-prev prev">Previous</a>
+				 <a href="JavaScript:void(0);" class="album-next next">Next</a>
+				 <a href="JavaScript:void(0);" class="album-icon">Album</a>
+	 </div>
+	<div id="scroll-album" class="scrollable">
+	<div class="items"><div class="item">';
+	$total=0;
+	
+	while($nid = db_fetch_object($nodes)){
+		
+		if($total % $number_of_items == 0 && $total!=0){
+		  $output .='</div><div class="item">';
+		}
+		
+		$vars['node']=node_load($nid->nid);
+		
+		$file_fid= $vars['node']->field_media[0]['value'];
+		
+	    $result = db_query('SELECT * FROM {files} WHERE fid = %d', $file_fid);
+	    if (db_affected_rows($result)){
+		  $file=db_fetch_object($result);
+		  $ext = substr($file->filename, strrpos($file->filename, '.') + 1);
+		  switch($ext){
+			case "mov":
+			case "mp3":
+			case "flv":
+			  $output .= '<div class="download-wrapper"><div class="filetype"><img src="'.base_path().path_to_theme().'/images/logos/'.$ext.'.gif"/></div><div class="download-file-type">'.l($file->filename,'node/'.$nid->nid).'</div></div>';
+			break;
+			case "doc":
+			case "rtf":
+			case "txt":
+			case "csv":
+			case "ppt":
+			case "xls":
+			case "pdf":
+			  $output .= '<div class="download-wrapper"><div class="filetype"><img src="'.base_path().path_to_theme().'/images/logos/'.$ext.'.gif"/></div><div class="download-file-type">'.l($file->filename,'node/'.$nid->nid).'</div></div>';
+			break;
+			default:
+			  $output .= l('<div class="image-wrap">'.theme('imagecache', 'image_uploads_album', $file->filepath, 'Grabbit Image', $vars['node']->body).'</div>','node/'.$nid->nid,array('html'=>TRUE));
+			break;
+		  }
+		
+	    }
+		$total++;
+	  }
+	
+	$output .='</div></div></div>';
+	
+//	return $output;
+	return $output;
+}

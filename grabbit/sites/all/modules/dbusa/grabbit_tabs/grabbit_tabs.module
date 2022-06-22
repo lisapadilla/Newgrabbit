@@ -1,0 +1,29 @@
+<?php
+
+/**
+ * Implementation of hook_menu_alter
+ * reorders tabs and menus throughout grabbit
+ */
+function grabbit_tabs_menu_alter( &$items )
+{
+  //print_r($items);
+  $items['user/%/myfriends']['type'] = MENU_CALLBACK;
+  $items['user/%user/invites']['type'] = MENU_CALLBACK;
+  $items['user/%user/contact']['type'] = MENU_CALLBACK;
+  $items['user/%user/track/navigation']['type'] = MENU_CALLBACK;
+  $items['user/%user_category/editpro']=$items['user/%user_category/edit/profile'];
+ /* $items['user/%user_category/editpro']['title'] = "Prueba";
+  $items['user/%user_category/editpro']['page callback']='content_profile_page_edit';
+  $user = $items['user/%user_category/editpro']['page arguments'][0];
+  $items['user/%user_category/editpro']['page arguments'][0]='profile';
+  $items['user/%user_category/editpro']['page arguments'][1]=$user;
+  $items['user/%user_category/editpro']['access arguments'][0]='profile';
+  $items['user/%user_category/editpro']['access arguments'][1]=$user;
+  $items['user/%user_category/editpro']['access callback']='content_profile_page_access';
+*/
+  $items['user/%user_category/editpro']['title']='Edit';
+  $items['user/%user_category/edit']['type'] = MENU_CALLBACK;
+  unset($items['user/%user_category/editpro']['tab_parent']);
+
+
+}
